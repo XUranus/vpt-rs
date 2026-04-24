@@ -35,6 +35,7 @@ use crate::types::{
     BackupPlan, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle, SnapshotInfo,
     SnapshotRequest, VolumeRef,
 };
+use tracing::error;
 
 pub fn current_platform() -> &'static str {
     std::env::consts::OS
@@ -125,15 +126,21 @@ impl SnapshotProvider for StubBackend {
     }
 
     fn create_snapshot(&self, _request: &SnapshotRequest) -> Result<SnapshotInfo> {
-        Err(unsupported("create_snapshot", self.backend_name))
+        let error = unsupported("create_snapshot", self.backend_name);
+        error!(backend = self.backend_name, error = %error, "create_snapshot failed");
+        Err(error)
     }
 
     fn delete_snapshot(&self, _snapshot: &SnapshotHandle) -> Result<()> {
-        Err(unsupported("delete_snapshot", self.backend_name))
+        let error = unsupported("delete_snapshot", self.backend_name);
+        error!(backend = self.backend_name, error = %error, "delete_snapshot failed");
+        Err(error)
     }
 
     fn list_snapshots(&self, _source: &VolumeRef) -> Result<Vec<SnapshotInfo>> {
-        Err(unsupported("list_snapshots", self.backend_name))
+        let error = unsupported("list_snapshots", self.backend_name);
+        error!(backend = self.backend_name, error = %error, "list_snapshots failed");
+        Err(error)
     }
 }
 
@@ -147,7 +154,9 @@ impl BlockDeviceCopier for StubBackend {
     }
 
     fn backup_volume(&self, _plan: &BackupPlan) -> Result<()> {
-        Err(unsupported("backup_volume", self.backend_name))
+        let error = unsupported("backup_volume", self.backend_name);
+        error!(backend = self.backend_name, error = %error, "backup_volume failed");
+        Err(error)
     }
 }
 
@@ -161,7 +170,9 @@ impl RestorePlanner for StubBackend {
     }
 
     fn restore_volume(&self, _plan: &RestorePlan) -> Result<()> {
-        Err(unsupported("restore_volume", self.backend_name))
+        let error = unsupported("restore_volume", self.backend_name);
+        error!(backend = self.backend_name, error = %error, "restore_volume failed");
+        Err(error)
     }
 }
 
@@ -175,10 +186,14 @@ impl MountManager for StubBackend {
     }
 
     fn mount_snapshot(&self, _request: &MountRequest) -> Result<MountHandle> {
-        Err(unsupported("mount_snapshot", self.backend_name))
+        let error = unsupported("mount_snapshot", self.backend_name);
+        error!(backend = self.backend_name, error = %error, "mount_snapshot failed");
+        Err(error)
     }
 
     fn unmount(&self, _handle: &MountHandle) -> Result<()> {
-        Err(unsupported("unmount", self.backend_name))
+        let error = unsupported("unmount", self.backend_name);
+        error!(backend = self.backend_name, error = %error, "unmount failed");
+        Err(error)
     }
 }

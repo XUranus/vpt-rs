@@ -1,12 +1,17 @@
 use std::process::ExitCode;
+use tracing::{error, info};
 
+use vpt_rs::logging;
 use vpt_rs::platform;
 use vpt_rs::{SnapshotKind, SnapshotProvider, SnapshotRequest, VolumeRef};
 
 fn main() -> ExitCode {
+    logging::init_logging();
+    info!(tool = "vb-snapshot", "cli started");
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            error!(tool = "vb-snapshot", error = %error, timeout_secs = error.timeout_secs(), "cli failed");
             eprintln!("error: {error}");
             ExitCode::from(1)
         }

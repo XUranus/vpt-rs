@@ -1,7 +1,21 @@
+//! Core library surface for the Rust volume backup project.
+//!
+//! The main public model is:
+//!
+//! - [`BackupPlan`] for export/send style backup flows
+//! - [`RestorePlan`] for import/receive style restore flows
+//! - [`SnapshotRequest`] and [`SnapshotProvider`] for snapshot lifecycle operations
+//!
+//! `BackupPlan` now distinguishes live volume sources from explicit snapshot sources so
+//! providers like Btrfs and ZFS can support file-based send/receive workflows without
+//! overloading plain strings.
+
 pub mod backup;
 pub mod error;
+pub mod logging;
 pub mod mount;
 pub mod platform;
+pub mod process;
 pub mod restore;
 pub mod snapshot;
 pub mod types;
@@ -13,8 +27,9 @@ pub use platform::BackendDescriptor;
 pub use restore::RestorePlanner;
 pub use snapshot::SnapshotProvider;
 pub use types::{
-    BackupPlan, BackupTarget, Capability, MountHandle, MountMode, MountRequest, RestorePlan,
-    SnapshotHandle, SnapshotInfo, SnapshotKind, SnapshotRequest, VolumeRef,
+    BackupPlan, BackupSource, BackupTarget, Capability, MountHandle, MountMode, MountRequest,
+    RestorePlan, SnapshotHandle, SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRef,
+    SnapshotRequest, VolumeRef,
 };
 
 #[cfg(test)]

@@ -1,14 +1,19 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
+use tracing::{error, info};
 
+use vpt_rs::logging;
 use vpt_rs::platform;
 use vpt_rs::restore::RestorePlanner;
-use vpt_rs::{BackupTarget, RestorePlan, VolumeRef};
+use vpt_rs::{BackupTarget, RestorePlan, SnapshotRef, VolumeRef};
 
 fn main() -> ExitCode {
+    logging::init_logging();
+    info!(tool = "vb-restore", "cli started");
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            error!(tool = "vb-restore", error = %error, timeout_secs = error.timeout_secs(), "cli failed");
             eprintln!("error: {error}");
             ExitCode::from(1)
         }
@@ -28,6 +33,7 @@ fn run() -> vpt_rs::Result<()> {
         source: BackupTarget::ImageFile(request.input.clone()),
         destination: request.destination,
         force: request.force,
+        base_snapshot: request.base_snapshot,
     })?;
 
     println!("backend: {}", backend.backend_name());
@@ -40,6 +46,7 @@ struct RestoreRequest {
     input: PathBuf,
     destination: VolumeRef,
     force: bool,
+    base_snapshot: Option<SnapshotRef>,
 }
 
 fn parse_restore_request(args: Vec<String>) -> vpt_rs::Result<RestoreRequest> {
@@ -47,6 +54,7 @@ fn parse_restore_request(args: Vec<String>) -> vpt_rs::Result<RestoreRequest> {
     let mut input = None;
     let mut destination = None;
     let mut force = false;
+    let mut base_snapshot = None;
 
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
@@ -65,6 +73,12 @@ fn parse_restore_request(args: Vec<String>) -> vpt_rs::Result<RestoreRequest> {
             }
             "--force" => {
                 force = true;
+            }
+            "--base-snapshot" => {
+                let Some(value) = iter.next() else {
+                    return missing("--base-snapshot");
+                };
+                base_snapshot = Some(SnapshotRef::new(value));
             }
             "--help" | "-h" | "help" => {
                 print_usage();
@@ -97,6 +111,7 @@ fn parse_restore_request(args: Vec<String>) -> vpt_rs::Result<RestoreRequest> {
         input,
         destination,
         force,
+        base_snapshot,
     })
 }
 
@@ -126,5 +141,7 @@ fn missing(flag: &str) -> vpt_rs::Result<RestoreRequest> {
 }
 
 fn print_usage() {
-    println!("vb-restore <destination-dir> --input <stream-file> [--provider <name>] [--force]");
+    println!(
+        "vb-restore <destination-dir> --input <stream-file> [--provider <name>] [--force] [--base-snapshot <id>]"
+    );
 }

@@ -1,17 +1,17 @@
-use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{error, info};
 
 use crate::backup::BlockDeviceCopier;
 use crate::error::{Error, Result};
 use crate::mount::MountManager;
 use crate::platform::StubBackend;
+use crate::process::{self, CommandIo};
 use crate::restore::RestorePlanner;
 use crate::snapshot::SnapshotProvider;
 use crate::types::{
-    BackupPlan, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle, SnapshotInfo,
-    SnapshotKind, SnapshotRequest, VolumeRef,
+    BackupPlan, BackupSource, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle,
+    SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRef, SnapshotRequest, VolumeRef,
 };
 
 const CAPABILITIES: &[Capability] = &[
@@ -41,14 +41,6 @@ impl BtrfsCommand {
             args: args.into_iter().collect(),
         }
     }
-
-    fn display(&self) -> String {
-        if self.args.is_empty() {
-            self.program.to_string()
-        } else {
-            format!("{} {}", self.program, self.args.join(" "))
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +55,8 @@ pub struct BtrfsSnapshotPlan {
 pub struct BtrfsSendPlan {
     pub source: PathBuf,
     pub target: PathBuf,
+    pub parent: Option<PathBuf>,
+    pub temporary_snapshot: Option<BtrfsSnapshotPlan>,
     pub command: BtrfsCommand,
 }
 
@@ -122,11 +116,6 @@ impl BtrfsBackend {
     }
 
     pub fn plan_backup(&self, plan: &BackupPlan) -> Result<BtrfsSendPlan> {
-        let source = self.volume_path(&plan.source)?;
-        if !source.exists() {
-            return Err(Error::MissingPath { path: source });
-        }
-
         let target = match &plan.target {
             crate::types::BackupTarget::ImageFile(path) => path.clone(),
             crate::types::BackupTarget::Device(path) => {
@@ -139,11 +128,52 @@ impl BtrfsBackend {
             }
         };
 
-        let command = BtrfsCommand::new(vec!["send".to_string(), source.display().to_string()]);
+        let (source, temporary_snapshot) = match (&plan.source, &plan.snapshot_policy) {
+            (BackupSource::Snapshot(snapshot), _) => (self.snapshot_ref_path(snapshot)?, None),
+            (BackupSource::Volume(volume), SnapshotPolicy::Disabled) => {
+                let source = self.volume_path(volume)?;
+                if !source.exists() {
+                    return Err(Error::MissingPath { path: source });
+                }
+                (source, None)
+            }
+            (
+                BackupSource::Volume(volume),
+                SnapshotPolicy::Temporary {
+                    kind,
+                    label,
+                    read_only,
+                },
+            ) => {
+                let request = SnapshotRequest {
+                    source: volume.clone(),
+                    kind: *kind,
+                    label: label.clone(),
+                    read_only: *read_only,
+                };
+                let snapshot_plan = self.plan_create_snapshot(&request)?;
+                (snapshot_plan.snapshot_path.clone(), Some(snapshot_plan))
+            }
+        };
+
+        let parent = match &plan.parent_snapshot {
+            Some(snapshot) => Some(self.snapshot_ref_path(snapshot)?),
+            None => None,
+        };
+
+        let mut args = vec!["send".to_string()];
+        if let Some(parent) = &parent {
+            args.push("-p".to_string());
+            args.push(parent.display().to_string());
+        }
+        args.push(source.display().to_string());
+        let command = BtrfsCommand::new(args);
 
         Ok(BtrfsSendPlan {
             source,
             target,
+            parent,
+            temporary_snapshot,
             command,
         })
     }
@@ -243,76 +273,78 @@ impl BtrfsBackend {
         Ok(PathBuf::from(&snapshot.id))
     }
 
-    fn run_command(&self, command: &BtrfsCommand) -> Result<std::process::Output> {
-        let output = Command::new(command.program).args(&command.args).output()?;
-        if output.status.success() {
-            Ok(output)
-        } else {
-            Err(Error::CommandFailed {
-                command: command.display(),
-                status: output.status.code().unwrap_or(-1),
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            })
+    fn snapshot_ref_path(&self, snapshot: &SnapshotRef) -> Result<PathBuf> {
+        if snapshot.id.trim().is_empty() {
+            return Err(Error::InvalidArgument {
+                message: "snapshot reference must not be empty".to_string(),
+            });
         }
+
+        let path = PathBuf::from(&snapshot.id);
+        if !path.is_absolute() {
+            return Err(Error::InvalidArgument {
+                message: format!(
+                    "btrfs snapshot reference expects an absolute subvolume path, got `{}`",
+                    snapshot.id
+                ),
+            });
+        }
+
+        Ok(path)
+    }
+
+    fn run_command(&self, command: &BtrfsCommand) -> Result<std::process::Output> {
+        process::run_command(
+            self.backend_name(),
+            "run_command",
+            command.program,
+            &command.args,
+            CommandIo::default(),
+        )
     }
 
     fn run_send(&self, plan: &BtrfsSendPlan) -> Result<()> {
-        if let Some(parent) = plan.target.parent() {
-            std::fs::create_dir_all(parent)?;
+        if let Some(snapshot_plan) = &plan.temporary_snapshot {
+            if let Some(parent) = snapshot_plan.snapshot_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            self.run_command(&snapshot_plan.command)?;
         }
 
-        let mut child = Command::new(plan.command.program)
-            .args(&plan.command.args)
-            .stdout(Stdio::piped())
-            .spawn()?;
+        let result = process::run_command(
+            self.backend_name(),
+            "backup_volume",
+            plan.command.program,
+            &plan.command.args,
+            CommandIo {
+                stdin_file: None,
+                stdout_file: Some(plan.target.clone()),
+            },
+        );
 
-        let stdout = child.stdout.take().ok_or_else(|| Error::Io {
-            message: "failed to capture btrfs send stdout".to_string(),
-        })?;
-        let mut reader = BufReader::new(stdout);
-        let file = std::fs::File::create(&plan.target)?;
-        let mut writer = BufWriter::new(file);
-        std::io::copy(&mut reader, &mut writer)?;
-        writer.flush()?;
-
-        let status = child.wait()?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(Error::CommandFailed {
-                command: plan.command.display(),
-                status: status.code().unwrap_or(-1),
-                stderr: String::new(),
-            })
+        if let Some(snapshot_plan) = &plan.temporary_snapshot {
+            let _ = self.run_command(&BtrfsCommand::new(vec![
+                "subvolume".to_string(),
+                "delete".to_string(),
+                snapshot_plan.snapshot_path.display().to_string(),
+            ]));
         }
+
+        result.map(|_| ())
     }
 
     fn run_receive(&self, plan: &BtrfsReceivePlan) -> Result<()> {
-        let input = std::fs::File::open(&plan.stream)?;
-        let mut child = Command::new(plan.command.program)
-            .args(&plan.command.args)
-            .stdin(Stdio::piped())
-            .spawn()?;
-
-        let stdin = child.stdin.take().ok_or_else(|| Error::Io {
-            message: "failed to open btrfs receive stdin".to_string(),
-        })?;
-        let mut writer = BufWriter::new(stdin);
-        let mut reader = BufReader::new(input);
-        std::io::copy(&mut reader, &mut writer)?;
-        writer.flush()?;
-        drop(writer);
-
-        let status = child.wait()?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(Error::CommandFailed {
-                command: plan.command.display(),
-                status: status.code().unwrap_or(-1),
-                stderr: String::new(),
-            })
-        }
+        process::run_command(
+            self.backend_name(),
+            "restore_volume",
+            plan.command.program,
+            &plan.command.args,
+            CommandIo {
+                stdin_file: Some(plan.stream.clone()),
+                stdout_file: None,
+            },
+        )?;
+        Ok(())
     }
 
     fn parse_list_output(&self, source: &VolumeRef, stdout: &[u8]) -> Vec<SnapshotInfo> {
@@ -360,33 +392,54 @@ impl SnapshotProvider for BtrfsBackend {
     }
 
     fn create_snapshot(&self, request: &SnapshotRequest) -> Result<SnapshotInfo> {
-        let plan = self.plan_create_snapshot(request)?;
-        if let Some(parent) = plan.snapshot_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        self.run_command(&plan.command)?;
+        info!(backend = self.backend_name(), source = %request.source, read_only = request.read_only, "create_snapshot called");
+        let result = (|| {
+            let plan = self.plan_create_snapshot(request)?;
+            if let Some(parent) = plan.snapshot_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            self.run_command(&plan.command)?;
 
-        Ok(SnapshotInfo {
-            handle: SnapshotHandle {
-                id: plan.snapshot_path.display().to_string(),
-                source: request.source.clone(),
-            },
-            backend: self.backend_name(),
-            path_hint: Some(plan.snapshot_path),
-            read_only: plan.read_only,
-        })
+            Ok(SnapshotInfo {
+                handle: SnapshotHandle {
+                    id: plan.snapshot_path.display().to_string(),
+                    source: request.source.clone(),
+                },
+                backend: self.backend_name(),
+                path_hint: Some(plan.snapshot_path),
+                read_only: plan.read_only,
+            })
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), source = %request.source, error = %error, "create_snapshot failed");
+        }
+        result
     }
 
     fn delete_snapshot(&self, snapshot: &SnapshotHandle) -> Result<()> {
-        let command = self.plan_delete_snapshot(snapshot)?;
-        self.run_command(&command)?;
-        Ok(())
+        info!(backend = self.backend_name(), snapshot = %snapshot.id, "delete_snapshot called");
+        let result = (|| {
+            let command = self.plan_delete_snapshot(snapshot)?;
+            self.run_command(&command)?;
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), snapshot = %snapshot.id, error = %error, "delete_snapshot failed");
+        }
+        result
     }
 
     fn list_snapshots(&self, source: &VolumeRef) -> Result<Vec<SnapshotInfo>> {
-        let command = self.plan_list_snapshots(source)?;
-        let output = self.run_command(&command)?;
-        Ok(self.parse_list_output(source, &output.stdout))
+        info!(backend = self.backend_name(), source = %source, "list_snapshots called");
+        let result = (|| {
+            let command = self.plan_list_snapshots(source)?;
+            let output = self.run_command(&command)?;
+            Ok(self.parse_list_output(source, &output.stdout))
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), source = %source, error = %error, "list_snapshots failed");
+        }
+        result
     }
 }
 
@@ -400,8 +453,15 @@ impl BlockDeviceCopier for BtrfsBackend {
     }
 
     fn backup_volume(&self, plan: &BackupPlan) -> Result<()> {
-        let send_plan = self.plan_backup(plan)?;
-        self.run_send(&send_plan)
+        info!(backend = self.backend_name(), source = %plan.source, "backup_volume called");
+        let result = (|| {
+            let send_plan = self.plan_backup(plan)?;
+            self.run_send(&send_plan)
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), source = %plan.source, error = %error, "backup_volume failed");
+        }
+        result
     }
 }
 
@@ -415,8 +475,15 @@ impl RestorePlanner for BtrfsBackend {
     }
 
     fn restore_volume(&self, plan: &RestorePlan) -> Result<()> {
-        let receive_plan = self.plan_restore(plan)?;
-        self.run_receive(&receive_plan)
+        info!(backend = self.backend_name(), destination = %plan.destination, "restore_volume called");
+        let result = (|| {
+            let receive_plan = self.plan_restore(plan)?;
+            self.run_receive(&receive_plan)
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), destination = %plan.destination, error = %error, "restore_volume failed");
+        }
+        result
     }
 }
 
@@ -430,17 +497,21 @@ impl MountManager for BtrfsBackend {
     }
 
     fn mount_snapshot(&self, _request: &MountRequest) -> Result<MountHandle> {
-        Err(Error::UnsupportedOperation {
+        let error = Error::UnsupportedOperation {
             operation: "mount_snapshot",
             backend: self.backend_name(),
-        })
+        };
+        error!(backend = self.backend_name(), error = %error, "mount_snapshot failed");
+        Err(error)
     }
 
     fn unmount(&self, _handle: &MountHandle) -> Result<()> {
-        Err(Error::UnsupportedOperation {
+        let error = Error::UnsupportedOperation {
             operation: "unmount",
             backend: self.backend_name(),
-        })
+        };
+        error!(backend = self.backend_name(), error = %error, "unmount failed");
+        Err(error)
     }
 }
 
@@ -567,18 +638,62 @@ ID 259 gen 302 top level 5 path /mnt/data/.vb-snapshots/snap-2
 
         let plan = backend
             .plan_backup(&BackupPlan {
-                source: VolumeRef::new(source.display().to_string()),
+                source: BackupSource::Volume(VolumeRef::new(source.display().to_string())),
                 target: crate::types::BackupTarget::ImageFile(target.clone()),
-                use_snapshot: true,
+                snapshot_policy: SnapshotPolicy::temporary(
+                    SnapshotKind::CrashConsistent,
+                    Some("tmp".to_string()),
+                    true,
+                ),
+                parent_snapshot: None,
             })
             .unwrap();
 
-        assert_eq!(plan.source, source);
+        assert_eq!(plan.source, root.join(".vb-snapshots").join("tmp"));
         assert_eq!(plan.target, target);
         assert_eq!(
             plan.command.args,
             vec!["send", plan.source.to_string_lossy().as_ref()]
         );
+        assert!(plan.temporary_snapshot.is_some());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn backup_plan_uses_parent_snapshot_for_incremental_send() {
+        let backend = BtrfsBackend::new();
+        let root = std::env::temp_dir().join(format!("vpt-rs-btrfs-parent-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("subvol");
+        let parent = root.join(".vb-snapshots").join("base");
+        std::fs::create_dir_all(&source).unwrap();
+
+        let plan = backend
+            .plan_backup(&BackupPlan {
+                source: BackupSource::Snapshot(
+                    SnapshotRef::new(source.display().to_string())
+                        .with_origin(VolumeRef::new(source.display().to_string())),
+                ),
+                target: crate::types::BackupTarget::ImageFile(root.join("backup.stream")),
+                snapshot_policy: SnapshotPolicy::disabled(),
+                parent_snapshot: Some(
+                    SnapshotRef::new(parent.display().to_string())
+                        .with_origin(VolumeRef::new(source.display().to_string())),
+                ),
+            })
+            .unwrap();
+
+        assert_eq!(
+            plan.command.args,
+            vec![
+                "send",
+                "-p",
+                parent.to_string_lossy().as_ref(),
+                source.to_string_lossy().as_ref(),
+            ]
+        );
+        assert_eq!(plan.parent, Some(parent));
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -599,6 +714,7 @@ ID 259 gen 302 top level 5 path /mnt/data/.vb-snapshots/snap-2
                 source: crate::types::BackupTarget::ImageFile(stream.clone()),
                 destination: VolumeRef::new(destination.display().to_string()),
                 force: false,
+                base_snapshot: None,
             })
             .unwrap();
 

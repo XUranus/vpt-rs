@@ -1,7 +1,7 @@
 # TODO
 
 ## Near Term
-- Implement the Linux LVM provider with real snapshot create/list/delete flows.
+- Add privileged integration tests for the Linux LVM provider.
 - Design the generic API additions needed for incremental backup streams and parent snapshot references.
 - Add demo CLI coverage for richer backup and restore options as provider support expands.
 
@@ -17,5 +17,7 @@
 - Add snapshot enumeration and deletion through the requestor/session layer.
 
 ## Other Providers
-- Implement the Linux ZFS provider with snapshot and send/receive support.
+- Add privileged integration tests for the Linux ZFS provider.
+- Add incremental `zfs send -i/-I` support once the shared plan model can express parent/base snapshots.
+- Decide whether backup flows should auto-create temporary ZFS snapshots or keep requiring explicit snapshot identifiers.
 - Design macOS APFS snapshot support behind the shared snapshot traits.

@@ -11,42 +11,55 @@ Implemented:
 - send-based backup to a stream file
 - receive-based restore from a stream file
 - capability reporting and CLI selection
+- temporary snapshot policy for backup planning
+- parent snapshot support in send planning
+- backup CLI control over snapshot kind/label/read-only policy
 
 Not implemented:
 
-- incremental send with parent snapshots
 - mount/unmount flows
 - privileged round-trip integration tests against a real Btrfs filesystem
 
 ### LVM
-Status: scaffolded only.
+Status: partially implemented.
 
-Current state:
+Implemented:
 
 - backend registration
 - capability reporting
 - CLI selection path
+- logical volume path parsing
+- snapshot create/list/delete through the LVM CLI
+- read-only snapshot permission adjustment after creation
 
-Next expected work:
+Not implemented:
 
-- snapshot creation/deletion via `lvcreate`/`lvremove`
-- snapshot metadata discovery
 - restore/copy semantics for logical volumes
+- mount/unmount flows
+- privileged integration tests against a real LVM environment
 
 ### ZFS
-Status: scaffolded only.
+Status: partially implemented.
 
-Current state:
+Implemented:
 
 - backend registration
 - capability reporting
 - CLI selection path
+- dataset reference parsing
+- snapshot create/list/delete through the ZFS CLI
+- snapshot enumeration parsing from `zfs list -t snapshot`
+- file-based backup through `zfs send`
+- file-based restore through `zfs receive`
+- parent snapshot support in send planning
+- backup CLI control over explicit snapshot sources and parent snapshots
 
-Next expected work:
+Not implemented:
 
-- snapshot lifecycle through `zfs snapshot` and `zfs destroy`
-- send/receive integration
 - dataset-oriented restore planning
+- automatic snapshot creation for backup
+- mount/unmount flows
+- privileged integration tests against a real ZFS environment
 
 ## Windows
 Status: architecture prepared, implementation not started.

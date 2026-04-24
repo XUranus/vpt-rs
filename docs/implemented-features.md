@@ -18,6 +18,13 @@ The current platform layer exposes:
 - Linux provider selection by name (`btrfs`, `lvm`, `zfs`)
 - a Windows VSS-oriented module tree prepared for future FFI work
 
+The shared backup model now distinguishes:
+
+- live volume sources
+- explicit snapshot sources
+- temporary snapshot policy for backup flows
+- optional parent snapshot references for incremental-capable providers
+
 ## Implemented Snapshot Features
 `vb-snapshot` is available as a demo CLI with:
 
@@ -34,7 +41,27 @@ The Btrfs provider is the first provider with real snapshot logic. It currently 
 - `btrfs subvolume list -s`
 - `btrfs subvolume delete`
 
-LVM and ZFS currently expose capability metadata and selection paths, but still return stubbed operational errors.
+The LVM provider now implements snapshot planning and execution through the LVM CLI for:
+
+- `lvcreate --snapshot`
+- `lvchange --permission r` for read-only snapshots
+- `lvs`-based snapshot enumeration
+- `lvremove`-based snapshot deletion
+
+The ZFS provider now implements snapshot planning and execution through the ZFS CLI for:
+
+- `zfs snapshot`
+- `zfs list -t snapshot`
+- `zfs destroy`
+- `zfs send`
+- `zfs receive`
+
+The current ZFS backup/restore flow is file-based and intentionally narrow:
+
+- backup requires an explicit snapshot source such as `pool/fs@snap`
+- restore expects a dataset destination such as `pool/restore`
+
+Mount-oriented ZFS workflows remain stubbed.
 
 ## Implemented Backup And Restore Features
 `vb-backup` and `vb-restore` are available as demo CLIs.
@@ -44,8 +71,24 @@ The Btrfs provider currently implements:
 - backup planning and execution through `btrfs send`
 - restore planning and execution through `btrfs receive`
 - file-based stream export/import using `BackupTarget::ImageFile`
+- optional temporary snapshot creation for backup flows
+- optional parent snapshot references for incremental send planning
 
-Incremental parent/base snapshot streams are not implemented yet.
+The ZFS provider currently implements:
+
+- backup planning and execution through `zfs send`
+- restore planning and execution through `zfs receive`
+- explicit snapshot-source backup flows
+- optional parent snapshot references for incremental send planning
+
+The current CLI surface includes:
+
+- `vb-backup --snapshot-source`
+- `vb-backup --parent-snapshot <id>`
+- `vb-backup --snapshot-kind crash|application`
+- `vb-backup --snapshot-label <name>`
+- `vb-backup --snapshot-read-write`
+- `vb-restore --base-snapshot <id>`
 
 ## Validation And Testing
 The project currently has unit tests for:

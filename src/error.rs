@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -35,6 +34,13 @@ pub enum Error {
         stderr: String,
     },
 
+    #[error("operation `{operation}` on backend `{backend}` timed out after {timeout_secs}s")]
+    Timeout {
+        operation: &'static str,
+        backend: &'static str,
+        timeout_secs: u64,
+    },
+
     #[error("{message}")]
     Message { message: String },
 }
@@ -43,6 +49,15 @@ impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
         Self::Io {
             message: error.to_string(),
+        }
+    }
+}
+
+impl Error {
+    pub fn timeout_secs(&self) -> Option<u64> {
+        match self {
+            Self::Timeout { timeout_secs, .. } => Some(*timeout_secs),
+            _ => None,
         }
     }
 }
