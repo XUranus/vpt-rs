@@ -14,12 +14,14 @@ DATASET_NAME="${POOL_NAME}/data"
 RESTORE_DATASET="${POOL_NAME}/restore"
 DATASET_MOUNT="${MOUNT_ROOT}/${TEST_NAME}-data"
 RESTORE_MOUNT="${MOUNT_ROOT}/${TEST_NAME}-restore"
+SNAPSHOT_MOUNT="${MOUNT_ROOT}/${TEST_NAME}-snapshot"
 STREAM_PATH="${COPY_DIR}/${TEST_NAME}.zfs"
 
 cleanup() {
   set +e
+  umount "${SNAPSHOT_MOUNT}" >/dev/null 2>&1 || true
   zpool destroy -f "${POOL_NAME}" >/dev/null 2>&1 || true
-  rm -rf "${DATASET_MOUNT}" "${RESTORE_MOUNT}"
+  rm -rf "${DATASET_MOUNT}" "${RESTORE_MOUNT}" "${SNAPSHOT_MOUNT}"
   rm -f "${IMAGE_PATH}" "${STREAM_PATH}"
 }
 trap cleanup EXIT
@@ -34,11 +36,15 @@ truncate -s 2G "${IMAGE_PATH}"
 zpool create -f "${POOL_NAME}" "${IMAGE_PATH}"
 zfs create -o mountpoint="${DATASET_MOUNT}" "${DATASET_NAME}"
 zfs create -o mountpoint="${RESTORE_MOUNT}" "${RESTORE_DATASET}"
+mkdir -p "${SNAPSHOT_MOUNT}"
 printf 'hello-from-zfs\n' > "${DATASET_MOUNT}/hello.txt"
 zfs snapshot "${DATASET_NAME}@snap1"
 
 cd "${ROOT_DIR}"
 ./target/release/vb-snapshot list --provider zfs "${DATASET_NAME}"
+./target/release/vb-mount mount --provider zfs --target "${SNAPSHOT_MOUNT}" "${DATASET_NAME}@snap1"
+grep -q 'hello-from-zfs' "${SNAPSHOT_MOUNT}/hello.txt"
+./target/release/vb-mount unmount --provider zfs "${SNAPSHOT_MOUNT}"
 ./target/release/vb-backup --provider zfs --snapshot-source --output "${STREAM_PATH}" "${DATASET_NAME}@snap1"
 ./target/release/vb-restore --provider zfs --force --input "${STREAM_PATH}" "${RESTORE_DATASET}"
 

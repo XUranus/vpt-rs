@@ -59,6 +59,7 @@ The ZFS provider now implements snapshot planning and execution through the ZFS 
 - `zfs destroy`
 - `zfs send`
 - `zfs receive`
+- read-only snapshot bind-mount browsing via `.zfs/snapshot`
 
 The current ZFS backup/restore flow is file-based and intentionally narrow:
 
@@ -107,6 +108,7 @@ The project currently has unit tests for:
 - Btrfs mount/unmount planning
 - LVM backup/restore planning
 - LVM mount/unmount planning
+- ZFS mount/unmount planning
 
 Validated commands so far:
 

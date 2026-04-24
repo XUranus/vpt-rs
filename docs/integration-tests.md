@@ -43,6 +43,7 @@ The repository now includes filesystem-backed integration scripts under `scripts
 - creates a file-backed zpool
 - creates a dataset and snapshot
 - runs `vb-snapshot list`
+- mounts the snapshot through `vb-mount`, reads the test file, and unmounts it
 - runs `vb-backup` from an explicit snapshot source
 - runs `vb-restore --force` into a destination dataset
 - validates restored file content

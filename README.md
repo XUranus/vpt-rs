@@ -15,7 +15,7 @@ Linux providers currently implemented:
 
 - `btrfs`: snapshot create/list/delete, `send` backup, `receive` restore, snapshot mount/unmount
 - `lvm`: snapshot create/list/delete, image backup/restore, snapshot mount/unmount
-- `zfs`: snapshot create/list/delete, `send` backup, `receive` restore
+- `zfs`: snapshot create/list/delete, `send` backup, `receive` restore, read-only snapshot mount/unmount
 
 Windows VSS scaffolding exists, but the real COM-backed implementation is still pending.
 
@@ -44,6 +44,7 @@ Provider-specific demos:
 ./target/release/vb-mount mount --provider btrfs /path/to/.vb-snapshots/snap0
 ./target/release/vb-restore --provider lvm --force --input /tmp/volume.img /dev/vg0/restore
 ./target/release/vb-mount mount --provider lvm /dev/vg0/snap0
+./target/release/vb-mount mount --provider zfs tank/data@snap0
 ```
 
 ## Integration Scripts

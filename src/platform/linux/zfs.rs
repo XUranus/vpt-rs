@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tracing::{error, info};
@@ -25,6 +25,9 @@ const CAPABILITIES: &[Capability] = &[
 ];
 
 const ZFS_BIN: &str = "zfs";
+const MOUNT_BIN: &str = "mount";
+const UMOUNT_BIN: &str = "umount";
+const TEMP_MOUNT_PREFIX: &str = "vpt-zfs-mount-";
 
 #[derive(Debug, Clone)]
 pub struct ZfsBackend(StubBackend);
@@ -71,6 +74,15 @@ pub struct ZfsReceivePlan {
     pub stream: PathBuf,
     pub destination_dataset: String,
     pub command: ZfsCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZfsMountPlan {
+    pub snapshot: ZfsSnapshotRef,
+    pub snapshot_path: PathBuf,
+    pub mount_point: PathBuf,
+    pub auto_created_target: bool,
+    pub commands: Vec<ZfsCommand>,
 }
 
 impl ZfsCommand {
@@ -314,6 +326,91 @@ impl ZfsBackend {
         })
     }
 
+    pub fn plan_resolve_dataset_mountpoint(&self, dataset: &str) -> ZfsCommand {
+        ZfsCommand::new(vec![
+            "get".to_string(),
+            "-H".to_string(),
+            "-o".to_string(),
+            "value".to_string(),
+            "mountpoint".to_string(),
+            dataset.to_string(),
+        ])
+    }
+
+    pub fn plan_mount_snapshot(
+        &self,
+        request: &MountRequest,
+        snapshot: ZfsSnapshotRef,
+        dataset_mountpoint: &Path,
+    ) -> Result<ZfsMountPlan> {
+        if matches!(request.mode, crate::types::MountMode::ReadWrite) {
+            return Err(Error::MissingCapability {
+                capability: Capability::WritableSnapshotMount.as_str(),
+                backend: self.backend_name(),
+            });
+        }
+
+        let snapshot_path = dataset_mountpoint
+            .join(".zfs")
+            .join("snapshot")
+            .join(&snapshot.snapshot);
+
+        let (mount_point, auto_created_target) = match &request.target {
+            Some(target) => (target.clone(), false),
+            None => (
+                std::env::temp_dir().join(format!(
+                    "{TEMP_MOUNT_PREFIX}{}",
+                    sanitize_snapshot_segment(&snapshot.snapshot)
+                )),
+                true,
+            ),
+        };
+
+        let commands = vec![
+            ZfsCommand {
+                program: MOUNT_BIN,
+                args: vec![
+                    "--bind".to_string(),
+                    snapshot_path.display().to_string(),
+                    mount_point.display().to_string(),
+                ],
+            },
+            ZfsCommand {
+                program: MOUNT_BIN,
+                args: vec![
+                    "-o".to_string(),
+                    "remount,bind,ro".to_string(),
+                    mount_point.display().to_string(),
+                ],
+            },
+        ];
+
+        Ok(ZfsMountPlan {
+            snapshot,
+            snapshot_path,
+            mount_point,
+            auto_created_target,
+            commands,
+        })
+    }
+
+    pub fn plan_unmount(&self, handle: &MountHandle) -> Result<(PathBuf, ZfsCommand)> {
+        if handle.mount_point.as_os_str().is_empty() {
+            return Err(Error::InvalidArgument {
+                message: "mount point must not be empty".to_string(),
+            });
+        }
+
+        let mount_point = handle.mount_point.clone();
+        Ok((
+            mount_point.clone(),
+            ZfsCommand {
+                program: UMOUNT_BIN,
+                args: vec![mount_point.display().to_string()],
+            },
+        ))
+    }
+
     fn parse_receive_destination(&self, destination: &VolumeRef) -> Result<String> {
         let raw = destination.id.trim();
         if raw.is_empty() {
@@ -391,6 +488,21 @@ impl ZfsBackend {
         }
 
         snapshots
+    }
+
+    fn resolve_dataset_mountpoint(&self, dataset: &str) -> Result<PathBuf> {
+        let command = self.plan_resolve_dataset_mountpoint(dataset);
+        let output = self.run_command("resolve_mountpoint", &command)?;
+        let mountpoint = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        match mountpoint.as_str() {
+            "" | "-" | "none" | "legacy" => Err(Error::InvalidArgument {
+                message: format!(
+                    "zfs dataset `{dataset}` does not expose a usable mountpoint for snapshot browsing"
+                ),
+            }),
+            value => Ok(PathBuf::from(value)),
+        }
     }
 }
 
@@ -548,22 +660,46 @@ impl MountManager for ZfsBackend {
         self.0.capabilities()
     }
 
-    fn mount_snapshot(&self, _request: &MountRequest) -> Result<MountHandle> {
-        let error = Error::UnsupportedOperation {
-            operation: "mount_snapshot",
-            backend: self.backend_name(),
-        };
-        error!(backend = self.backend_name(), error = %error, "mount_snapshot failed");
-        Err(error)
+    fn mount_snapshot(&self, request: &MountRequest) -> Result<MountHandle> {
+        info!(backend = self.backend_name(), snapshot = %request.snapshot.id, "mount_snapshot called");
+        let result = (|| {
+            let snapshot = self.parse_snapshot_ref(&VolumeRef::new(request.snapshot.id.clone()))?;
+            let dataset_mountpoint = self.resolve_dataset_mountpoint(&snapshot.dataset)?;
+            let plan = self.plan_mount_snapshot(request, snapshot, &dataset_mountpoint)?;
+            if !plan.snapshot_path.exists() {
+                return Err(Error::MissingPath {
+                    path: plan.snapshot_path,
+                });
+            }
+            std::fs::create_dir_all(&plan.mount_point)?;
+            for command in &plan.commands {
+                self.run_command("mount_snapshot", command)?;
+            }
+            Ok(MountHandle {
+                id: plan.mount_point.display().to_string(),
+                mount_point: plan.mount_point,
+            })
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), snapshot = %request.snapshot.id, error = %error, "mount_snapshot failed");
+        }
+        result
     }
 
-    fn unmount(&self, _handle: &MountHandle) -> Result<()> {
-        let error = Error::UnsupportedOperation {
-            operation: "unmount",
-            backend: self.backend_name(),
-        };
-        error!(backend = self.backend_name(), error = %error, "unmount failed");
-        Err(error)
+    fn unmount(&self, handle: &MountHandle) -> Result<()> {
+        info!(backend = self.backend_name(), mount_point = %handle.mount_point.display(), "unmount called");
+        let result = (|| {
+            let (mount_point, command) = self.plan_unmount(handle)?;
+            self.run_command("unmount", &command)?;
+            if is_temporary_mount_path(&mount_point) {
+                let _ = std::fs::remove_dir(&mount_point);
+            }
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), mount_point = %handle.mount_point.display(), error = %error, "unmount failed");
+        }
+        result
     }
 }
 
@@ -596,10 +732,19 @@ fn sanitize_snapshot_segment(value: &str) -> String {
     }
 }
 
+fn is_temporary_mount_path(path: &Path) -> bool {
+    path.parent() == Some(std::env::temp_dir().as_path())
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.starts_with(TEMP_MOUNT_PREFIX))
+            .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::SnapshotRef;
+    use crate::types::{MountMode, SnapshotRef};
 
     #[test]
     fn parses_dataset_name_without_mount_path() {
@@ -784,5 +929,70 @@ mod tests {
 
         assert!(matches!(error, Error::InvalidArgument { .. }));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mount_plan_uses_bind_mount_for_snapshot_path() {
+        let backend = ZfsBackend::new();
+        let snapshot = ZfsSnapshotRef {
+            dataset: "tank/data".to_string(),
+            snapshot: "snap1".to_string(),
+            snapshot_id: "tank/data@snap1".to_string(),
+        };
+
+        let plan = backend
+            .plan_mount_snapshot(
+                &MountRequest {
+                    snapshot: SnapshotHandle {
+                        id: "tank/data@snap1".to_string(),
+                        source: VolumeRef::new("tank/data"),
+                    },
+                    mode: MountMode::ReadOnly,
+                    target: Some(PathBuf::from("/mnt/zfs-snapshot")),
+                },
+                snapshot,
+                Path::new("/tank/data"),
+            )
+            .unwrap();
+
+        assert_eq!(plan.snapshot_path, PathBuf::from("/tank/data/.zfs/snapshot/snap1"));
+        assert_eq!(plan.commands.len(), 2);
+        assert_eq!(
+            plan.commands[0].args,
+            vec![
+                "--bind",
+                "/tank/data/.zfs/snapshot/snap1",
+                "/mnt/zfs-snapshot"
+            ]
+        );
+        assert_eq!(
+            plan.commands[1].args,
+            vec!["-o", "remount,bind,ro", "/mnt/zfs-snapshot"]
+        );
+    }
+
+    #[test]
+    fn mount_plan_rejects_read_write_requests() {
+        let backend = ZfsBackend::new();
+        let error = backend
+            .plan_mount_snapshot(
+                &MountRequest {
+                    snapshot: SnapshotHandle {
+                        id: "tank/data@snap1".to_string(),
+                        source: VolumeRef::new("tank/data"),
+                    },
+                    mode: MountMode::ReadWrite,
+                    target: None,
+                },
+                ZfsSnapshotRef {
+                    dataset: "tank/data".to_string(),
+                    snapshot: "snap1".to_string(),
+                    snapshot_id: "tank/data@snap1".to_string(),
+                },
+                Path::new("/tank/data"),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, Error::MissingCapability { .. }));
     }
 }

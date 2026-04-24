@@ -56,12 +56,13 @@ Implemented:
 - file-based restore through `zfs receive`
 - parent snapshot support in send planning
 - backup CLI control over explicit snapshot sources and parent snapshots
+- read-only snapshot browsing through `.zfs/snapshot` bind mounts
 
 Not implemented:
 
 - dataset-oriented restore planning
 - automatic snapshot creation for backup
-- mount/unmount flows
+- writable snapshot browsing flows
 - privileged integration tests against a real ZFS environment
 
 ## Windows

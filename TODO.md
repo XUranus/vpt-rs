@@ -3,7 +3,7 @@
 ## Near Term
 - Design the generic API additions needed for incremental backup streams and parent snapshot references.
 - Add demo CLI coverage for richer backup and restore options as provider support expands.
-- Add mount demo coverage and integration assertions for providers beyond Btrfs and LVM.
+- Design whether ZFS writable browsing should be handled through clones rather than mount modes.
 
 ## Btrfs Follow-Up
 - Add privileged integration tests for a real Btrfs environment.
