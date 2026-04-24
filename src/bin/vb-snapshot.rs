@@ -103,6 +103,42 @@ fn run() -> vpt_rs::Result<()> {
             }
             Ok(())
         }
+        "delete" => {
+            let mut provider = None;
+            let mut snapshot_id = None;
+
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--provider" => {
+                        let Some(value) = args.next() else {
+                            return Err(vpt_rs::Error::InvalidArgument {
+                                message: "missing value after `--provider`".to_string(),
+                            });
+                        };
+                        provider = Some(value);
+                    }
+                    value if snapshot_id.is_none() => snapshot_id = Some(value.to_string()),
+                    _ => {
+                        return Err(vpt_rs::Error::InvalidArgument {
+                            message: format!("unexpected argument `{arg}`"),
+                        });
+                    }
+                }
+            }
+
+            let Some(snapshot_id) = snapshot_id else {
+                return Err(vpt_rs::Error::InvalidArgument {
+                    message: "missing snapshot id for `delete`".to_string(),
+                });
+            };
+
+            let backend = resolve_backend(provider.as_deref())?;
+            backend.delete_snapshot(&vpt_rs::SnapshotHandle {
+                id: snapshot_id,
+                source: VolumeRef::new("unknown"),
+            })?;
+            Ok(())
+        }
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())
@@ -254,6 +290,7 @@ fn print_usage() {
     println!("  backend list");
     println!("  capabilities [--provider <name>]");
     println!("  list [--provider <name>] <volume>");
+    println!("  delete [--provider <name>] <snapshot-id>");
     println!(
         "  create [--provider <name>] <volume> [--kind crash|application] [--label <name>] [--read-write]"
     );
