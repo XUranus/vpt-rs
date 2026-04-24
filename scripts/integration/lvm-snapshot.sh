@@ -37,8 +37,8 @@ vgcreate "${VG_NAME}" "${LOOP_DEVICE}"
 lvcreate -L 512M -n "${LV_NAME}" "${VG_NAME}"
 
 cd "${ROOT_DIR}"
-cargo run --bin vb-snapshot -- create --provider lvm --label "${SNAP_NAME}" /dev/${VG_NAME}/${LV_NAME}
-cargo run --bin vb-snapshot -- list --provider lvm /dev/${VG_NAME}/${LV_NAME}
-cargo run --bin vb-snapshot -- delete --provider lvm /dev/${VG_NAME}/${SNAP_NAME}
+./target/release/vb-snapshot create --provider lvm --label "${SNAP_NAME}" /dev/${VG_NAME}/${LV_NAME}
+./target/release/vb-snapshot list --provider lvm /dev/${VG_NAME}/${LV_NAME}
+./target/release/vb-snapshot delete --provider lvm /dev/${VG_NAME}/${SNAP_NAME}
 
 echo "lvm snapshot lifecycle ok"

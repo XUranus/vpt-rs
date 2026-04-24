@@ -43,10 +43,10 @@ mkdir -p "${RESTORE_ROOT}"
 printf 'hello-from-btrfs\n' > "${SOURCE_SUBVOL}/hello.txt"
 
 cd "${ROOT_DIR}"
-cargo run --bin vb-snapshot -- create --provider btrfs --label integ "${SOURCE_SUBVOL}"
-cargo run --bin vb-snapshot -- list --provider btrfs "${SOURCE_SUBVOL}"
-cargo run --bin vb-backup -- --provider btrfs --output "${STREAM_PATH}" "${SOURCE_SUBVOL}"
-cargo run --bin vb-restore -- --provider btrfs --input "${STREAM_PATH}" "${RESTORE_ROOT}"
+./target/release/vb-snapshot create --provider btrfs --label integ "${SOURCE_SUBVOL}"
+./target/release/vb-snapshot list --provider btrfs "${SOURCE_SUBVOL}"
+./target/release/vb-backup --provider btrfs --output "${STREAM_PATH}" "${SOURCE_SUBVOL}"
+./target/release/vb-restore --provider btrfs --input "${STREAM_PATH}" "${RESTORE_ROOT}"
 
 RESTORED_FILE="$(find "${RESTORE_ROOT}" -type f -name hello.txt | head -n 1)"
 if [[ -z "${RESTORED_FILE}" ]]; then

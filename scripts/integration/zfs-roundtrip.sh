@@ -36,9 +36,10 @@ printf 'hello-from-zfs\n' > "${DATASET_MOUNT}/hello.txt"
 zfs snapshot "${DATASET_NAME}@snap1"
 
 cd "${ROOT_DIR}"
-cargo run --bin vb-snapshot -- list --provider zfs "${DATASET_NAME}"
-cargo run --bin vb-backup -- --provider zfs --snapshot-source --output "${STREAM_PATH}" "${DATASET_NAME}@snap1"
-cargo run --bin vb-restore -- --provider zfs --input "${STREAM_PATH}" "${RESTORE_DATASET}"
+./target/release/vb-snapshot list --provider zfs "${DATASET_NAME}"
+./target/release/vb-backup --provider zfs --snapshot-source --output "${STREAM_PATH}" "${DATASET_NAME}@snap1"
+./target/release/vb-restore --provider zfs --force --input "${STREAM_PATH}" "${RESTORE_DATASET}"
 
 zfs list "${RESTORE_DATASET}" >/dev/null
+grep -q 'hello-from-zfs' "${RESTORE_MOUNT}/hello.txt"
 echo "zfs roundtrip ok"

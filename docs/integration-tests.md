@@ -6,6 +6,7 @@ The repository now includes filesystem-backed integration scripts under `scripts
 - `scripts/integration/btrfs-roundtrip.sh`
 - `scripts/integration/lvm-snapshot.sh`
 - `scripts/integration/zfs-roundtrip.sh`
+- `scripts/integration/run-all.sh`
 
 ## Environment Assumptions
 - image files are created under `/opt/volumeset`
@@ -33,7 +34,8 @@ The repository now includes filesystem-backed integration scripts under `scripts
 - creates a dataset and snapshot
 - runs `vb-snapshot list`
 - runs `vb-backup` from an explicit snapshot source
-- runs `vb-restore` into a destination dataset
+- runs `vb-restore --force` into a destination dataset
+- validates restored file content
 
 ## Running
 These scripts require privileges for loop devices, mounts, and storage management. Run them directly from the repository root or invoke them with an appropriate privileged shell.
@@ -43,4 +45,11 @@ Example:
 ```bash
 sudo IMAGE_DIR=/opt/volumeset COPY_DIR=/opt/volumeset/copy MOUNT_ROOT=/mnt/volmnt \
   bash scripts/integration/btrfs-roundtrip.sh
+```
+
+To run all currently available integration scripts:
+
+```bash
+sudo IMAGE_DIR=/opt/volumeset COPY_DIR=/opt/volumeset/copy MOUNT_ROOT=/mnt/volmnt \
+  bash scripts/integration/run-all.sh
 ```
