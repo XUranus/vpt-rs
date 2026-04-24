@@ -2,7 +2,7 @@
 
 ## Near Term
 - Design the generic API additions needed for incremental backup streams and parent snapshot references.
-- Add demo CLI coverage for richer backup and restore options as provider support expands.
+- Extend `vb-copy-mount` integration coverage beyond the current LVM workflow.
 - Design whether ZFS writable browsing should be handled through clones rather than mount modes.
 
 ## Btrfs Follow-Up

@@ -10,6 +10,9 @@ The crate is now structured as a library-first volume backup project with platfo
 
 The core shared surface lives in `src/lib.rs` and `src/types.rs`.
 
+The library also now exposes a higher-level temporary snapshot workflow in `src/copy_mount.rs`
+for create-mount-close style browsing flows.
+
 ## Platform Architecture
 The current platform layer exposes:
 
@@ -71,6 +74,13 @@ Mount-oriented ZFS workflows remain stubbed.
 ## Implemented Backup And Restore Features
 `vb-backup` and `vb-restore` are available as demo CLIs.
 
+`vb-copy-mount` is available as a higher-level demo CLI for:
+
+- creating a temporary snapshot from a live source
+- mounting it through the selected provider
+- closing it later by unmounting and deleting the temporary snapshot
+- real environment-backed validation on Linux through the LVM integration script
+
 The Btrfs provider currently implements:
 
 - backup planning and execution through `btrfs send`
@@ -96,6 +106,7 @@ The current CLI surface includes:
 - `vb-restore --base-snapshot <id>`
 - `vb-restore --force` for destructive block-level restore backends such as LVM
 - `vb-mount mount|unmount` for snapshot browsing flows
+- `vb-copy-mount open|close` for temporary snapshot-backed copy-mount flows
 
 ## Validation And Testing
 The project currently has unit tests for:
@@ -109,6 +120,7 @@ The project currently has unit tests for:
 - LVM backup/restore planning
 - LVM mount/unmount planning
 - ZFS mount/unmount planning
+- copy-mount workflow orchestration
 
 Validated commands so far:
 

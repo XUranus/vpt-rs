@@ -11,6 +11,7 @@
 //! overloading plain strings.
 
 pub mod backup;
+pub mod copy_mount;
 pub mod error;
 pub mod logging;
 pub mod mount;
@@ -21,6 +22,7 @@ pub mod snapshot;
 pub mod types;
 
 pub use backup::BlockDeviceCopier;
+pub use copy_mount::{CopyMountRequest, CopyMountSession, close_copy_mount, open_copy_mount};
 pub use error::{Error, Result};
 pub use mount::MountManager;
 pub use platform::BackendDescriptor;

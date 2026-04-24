@@ -9,7 +9,8 @@ The crate already exposes:
 - snapshot lifecycle traits and provider selection
 - backup and restore traits for file-backed export/import flows
 - mount traits for snapshot browsing workflows
-- demo CLIs: `vb-snapshot`, `vb-backup`, `vb-restore`, `vb-mount`
+- temporary snapshot + mount workflows through `copy_mount`
+- demo CLIs: `vb-snapshot`, `vb-backup`, `vb-restore`, `vb-mount`, `vb-copy-mount`
 
 Linux providers currently implemented:
 
@@ -42,6 +43,8 @@ Provider-specific demos:
 ./target/release/vb-snapshot backend list
 ./target/release/vb-backup --provider btrfs --output /tmp/backup.stream /path/to/subvol
 ./target/release/vb-mount mount --provider btrfs /path/to/.vb-snapshots/snap0
+./target/release/vb-copy-mount open --provider lvm /dev/vg0/data --target /mnt/copy-view
+./target/release/vb-copy-mount close --provider lvm /dev/vg0/data-snap-123 /mnt/copy-view
 ./target/release/vb-restore --provider lvm --force --input /tmp/volume.img /dev/vg0/restore
 ./target/release/vb-mount mount --provider lvm /dev/vg0/snap0
 ./target/release/vb-mount mount --provider zfs tank/data@snap0

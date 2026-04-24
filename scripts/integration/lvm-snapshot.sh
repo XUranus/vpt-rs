@@ -60,9 +60,10 @@ umount "${SOURCE_MOUNT}"
 cd "${ROOT_DIR}"
 ./target/release/vb-snapshot create --provider lvm --label "${SNAP_NAME}" /dev/${VG_NAME}/${LV_NAME}
 ./target/release/vb-snapshot list --provider lvm /dev/${VG_NAME}/${LV_NAME}
-./target/release/vb-mount mount --provider lvm --target "${SNAPSHOT_MOUNT}" /dev/${VG_NAME}/${SNAP_NAME}
+COPY_MOUNT_OUTPUT="$(./target/release/vb-copy-mount open --provider lvm --target "${SNAPSHOT_MOUNT}" /dev/${VG_NAME}/${LV_NAME})"
+COPY_MOUNT_SNAPSHOT="$(awk '/^snapshot:/ {print $2}' <<<"${COPY_MOUNT_OUTPUT}")"
 grep -q 'hello-from-lvm' "${SNAPSHOT_MOUNT}/hello.txt"
-./target/release/vb-mount unmount --provider lvm "${SNAPSHOT_MOUNT}"
+./target/release/vb-copy-mount close --provider lvm "${COPY_MOUNT_SNAPSHOT}" "${SNAPSHOT_MOUNT}"
 ./target/release/vb-backup --provider lvm --output "${STREAM_PATH}" /dev/${VG_NAME}/${LV_NAME}
 ./target/release/vb-restore --provider lvm --force --input "${STREAM_PATH}" /dev/${VG_NAME}/${RESTORE_LV_NAME}
 ./target/release/vb-snapshot delete --provider lvm /dev/${VG_NAME}/${SNAP_NAME}
