@@ -42,9 +42,10 @@ zfs snapshot "${DATASET_NAME}@snap1"
 
 cd "${ROOT_DIR}"
 ./target/release/vb-snapshot list --provider zfs "${DATASET_NAME}"
-./target/release/vb-mount mount --provider zfs --target "${SNAPSHOT_MOUNT}" "${DATASET_NAME}@snap1"
+COPY_MOUNT_OUTPUT="$(./target/release/vb-copy-mount open --provider zfs --label copyview --target "${SNAPSHOT_MOUNT}" "${DATASET_NAME}")"
+COPY_MOUNT_SNAPSHOT="$(awk '/^snapshot:/ {print $2}' <<<"${COPY_MOUNT_OUTPUT}")"
 grep -q 'hello-from-zfs' "${SNAPSHOT_MOUNT}/hello.txt"
-./target/release/vb-mount unmount --provider zfs "${SNAPSHOT_MOUNT}"
+./target/release/vb-copy-mount close --provider zfs "${COPY_MOUNT_SNAPSHOT}" "${SNAPSHOT_MOUNT}"
 ./target/release/vb-backup --provider zfs --snapshot-source --output "${STREAM_PATH}" "${DATASET_NAME}@snap1"
 ./target/release/vb-restore --provider zfs --force --input "${STREAM_PATH}" "${RESTORE_DATASET}"
 
