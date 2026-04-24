@@ -35,10 +35,10 @@ Implemented:
 - image-file restore through `dd`
 - temporary snapshot policy for backup planning
 - explicit `--force` guard for destructive restore
+- snapshot device mount/unmount through `mount` and `umount`
 
 Not implemented:
 
-- mount/unmount flows
 - incremental/differential export semantics
 
 ### ZFS

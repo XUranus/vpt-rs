@@ -10,8 +10,8 @@ use crate::process::{self, CommandIo};
 use crate::restore::RestorePlanner;
 use crate::snapshot::SnapshotProvider;
 use crate::types::{
-    BackupPlan, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle, SnapshotInfo,
-    SnapshotKind, SnapshotRequest, VolumeRef,
+    BackupPlan, Capability, MountHandle, MountMode, MountRequest, RestorePlan, SnapshotHandle,
+    SnapshotInfo, SnapshotKind, SnapshotRequest, VolumeRef,
 };
 
 const CAPABILITIES: &[Capability] = &[
@@ -28,8 +28,11 @@ const LVREMOVE_BIN: &str = "lvremove";
 const LVCHANGE_BIN: &str = "lvchange";
 const LVS_BIN: &str = "lvs";
 const DD_BIN: &str = "dd";
+const MOUNT_BIN: &str = "mount";
+const UMOUNT_BIN: &str = "umount";
 const DEFAULT_SNAPSHOT_SIZE: &str = "20%ORIGIN";
 const DEFAULT_COPY_BLOCK_SIZE: &str = "4M";
+const TEMP_MOUNT_PREFIX: &str = "vpt-lvm-mount-";
 
 #[derive(Debug, Clone)]
 pub struct LvmBackend(StubBackend);
@@ -70,6 +73,14 @@ pub struct LvmRestorePlan {
     pub destination: LvmVolumeRef,
     pub force: bool,
     pub copy_command: LvmCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LvmMountPlan {
+    pub snapshot_path: PathBuf,
+    pub mount_point: PathBuf,
+    pub auto_created_target: bool,
+    pub command: LvmCommand,
 }
 
 impl LvmCommand {
@@ -298,6 +309,60 @@ impl LvmBackend {
         })
     }
 
+    pub fn plan_mount_snapshot(&self, request: &MountRequest) -> Result<LvmMountPlan> {
+        let snapshot_path = PathBuf::from(request.snapshot.id.trim());
+        if request.snapshot.id.trim().is_empty() {
+            return Err(Error::InvalidArgument {
+                message: "snapshot id must not be empty".to_string(),
+            });
+        }
+
+        let (mount_point, auto_created_target) = match &request.target {
+            Some(target) => (target.clone(), false),
+            None => (
+                std::env::temp_dir().join(format!(
+                    "{TEMP_MOUNT_PREFIX}{}",
+                    sanitize_snapshot_segment(
+                        snapshot_path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("snapshot")
+                    )
+                )),
+                true,
+            ),
+        };
+
+        let mut args = Vec::new();
+        if matches!(request.mode, MountMode::ReadOnly) {
+            args.push("-o".to_string());
+            args.push("ro".to_string());
+        }
+        args.push(snapshot_path.display().to_string());
+        args.push(mount_point.display().to_string());
+
+        Ok(LvmMountPlan {
+            snapshot_path,
+            mount_point,
+            auto_created_target,
+            command: LvmCommand::new(MOUNT_BIN, args),
+        })
+    }
+
+    pub fn plan_unmount(&self, handle: &MountHandle) -> Result<(PathBuf, LvmCommand)> {
+        if handle.mount_point.as_os_str().is_empty() {
+            return Err(Error::InvalidArgument {
+                message: "mount point must not be empty".to_string(),
+            });
+        }
+
+        let mount_point = handle.mount_point.clone();
+        Ok((
+            mount_point.clone(),
+            LvmCommand::new(UMOUNT_BIN, vec![mount_point.display().to_string()]),
+        ))
+    }
+
     fn run_command(&self, command: &LvmCommand) -> Result<std::process::Output> {
         process::run_command(
             self.backend_name(),
@@ -501,22 +566,55 @@ impl MountManager for LvmBackend {
         self.0.capabilities()
     }
 
-    fn mount_snapshot(&self, _request: &MountRequest) -> Result<MountHandle> {
-        let error = Error::UnsupportedOperation {
-            operation: "mount_snapshot",
-            backend: self.backend_name(),
-        };
-        error!(backend = self.backend_name(), error = %error, "mount_snapshot failed");
-        Err(error)
+    fn mount_snapshot(&self, request: &MountRequest) -> Result<MountHandle> {
+        info!(
+            backend = self.backend_name(),
+            snapshot = %request.snapshot.id,
+            "mount_snapshot called"
+        );
+        let result = (|| {
+            let plan = self.plan_mount_snapshot(request)?;
+            std::fs::create_dir_all(&plan.mount_point)?;
+            self.run_command(&plan.command)?;
+            Ok(MountHandle {
+                id: plan.mount_point.display().to_string(),
+                mount_point: plan.mount_point,
+            })
+        })();
+        if let Err(error) = &result {
+            error!(
+                backend = self.backend_name(),
+                snapshot = %request.snapshot.id,
+                error = %error,
+                "mount_snapshot failed"
+            );
+        }
+        result
     }
 
-    fn unmount(&self, _handle: &MountHandle) -> Result<()> {
-        let error = Error::UnsupportedOperation {
-            operation: "unmount",
-            backend: self.backend_name(),
-        };
-        error!(backend = self.backend_name(), error = %error, "unmount failed");
-        Err(error)
+    fn unmount(&self, handle: &MountHandle) -> Result<()> {
+        info!(
+            backend = self.backend_name(),
+            mount_point = %handle.mount_point.display(),
+            "unmount called"
+        );
+        let result = (|| {
+            let (mount_point, command) = self.plan_unmount(handle)?;
+            self.run_command(&command)?;
+            if is_temporary_mount_path(&mount_point) {
+                let _ = std::fs::remove_dir(&mount_point);
+            }
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            error!(
+                backend = self.backend_name(),
+                mount_point = %handle.mount_point.display(),
+                error = %error,
+                "unmount failed"
+            );
+        }
+        result
     }
 }
 
@@ -547,6 +645,15 @@ fn sanitize_snapshot_segment(value: &str) -> String {
     } else {
         sanitized
     }
+}
+
+fn is_temporary_mount_path(path: &Path) -> bool {
+    path.parent() == Some(std::env::temp_dir().as_path())
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.starts_with(TEMP_MOUNT_PREFIX))
+            .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -727,5 +834,54 @@ snap2|data|/dev/vg0/snap2|Swi-a-r---
                 "status=none",
             ]
         );
+    }
+
+    #[test]
+    fn mount_plan_uses_read_only_mount_for_snapshot_device() {
+        let backend = LvmBackend::new();
+        let plan = backend
+            .plan_mount_snapshot(&MountRequest {
+                snapshot: SnapshotHandle {
+                    id: "/dev/vg0/snap1".to_string(),
+                    source: VolumeRef::new("/dev/vg0/data"),
+                },
+                mode: MountMode::ReadOnly,
+                target: Some(PathBuf::from("/mnt/snap1")),
+            })
+            .unwrap();
+
+        assert_eq!(plan.snapshot_path, PathBuf::from("/dev/vg0/snap1"));
+        assert_eq!(plan.mount_point, PathBuf::from("/mnt/snap1"));
+        assert!(!plan.auto_created_target);
+        assert_eq!(plan.command.program, MOUNT_BIN);
+        assert_eq!(plan.command.args, vec!["-o", "ro", "/dev/vg0/snap1", "/mnt/snap1"]);
+    }
+
+    #[test]
+    fn mount_plan_generates_temporary_target_when_missing() {
+        let backend = LvmBackend::new();
+        let plan = backend
+            .plan_mount_snapshot(&MountRequest {
+                snapshot: SnapshotHandle {
+                    id: "/dev/vg0/nightly backup".to_string(),
+                    source: VolumeRef::new("/dev/vg0/data"),
+                },
+                mode: MountMode::ReadWrite,
+                target: None,
+            })
+            .unwrap();
+
+        assert!(plan.auto_created_target);
+        assert!(is_temporary_mount_path(&plan.mount_point));
+        assert_eq!(
+            plan.mount_point.file_name().and_then(|name| name.to_str()),
+            Some("vpt-lvm-mount-nightly-backup")
+        );
+    }
+
+    #[test]
+    fn temporary_mount_path_detection_matches_prefix() {
+        assert!(is_temporary_mount_path(&std::env::temp_dir().join("vpt-lvm-mount-snap1")));
+        assert!(!is_temporary_mount_path(&PathBuf::from("/mnt/vpt-lvm-mount-snap1")));
     }
 }
