@@ -1,7 +1,6 @@
 # TODO
 
 ## Near Term
-- Add privileged integration tests for the Linux LVM provider.
 - Design the generic API additions needed for incremental backup streams and parent snapshot references.
 - Add demo CLI coverage for richer backup and restore options as provider support expands.
 
@@ -18,6 +17,7 @@
 
 ## Other Providers
 - Add privileged integration tests for the Linux ZFS provider.
+- Add privileged integration tests for the Linux LVM provider in CI or an environment-gated harness.
 - Add incremental `zfs send -i/-I` support once the shared plan model can express parent/base snapshots.
 - Decide whether backup flows should auto-create temporary ZFS snapshots or keep requiring explicit snapshot identifiers.
 - Design macOS APFS snapshot support behind the shared snapshot traits.

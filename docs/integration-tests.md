@@ -30,8 +30,11 @@ The repository now includes filesystem-backed integration scripts under `scripts
 
 ### LVM
 - creates a loopback PV/VG/LV
+- formats source and restore logical volumes as `ext4`
 - runs `vb-snapshot create/list/delete`
-- validates full snapshot lifecycle for the current LVM provider
+- runs `vb-backup` to export the source LV to an image file
+- runs `vb-restore --force` to write that image into a restore LV
+- validates restored file content
 - verifies that the deleted snapshot is no longer listed
 
 ### ZFS

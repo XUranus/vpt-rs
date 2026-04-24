@@ -47,6 +47,8 @@ The LVM provider now implements snapshot planning and execution through the LVM 
 - `lvchange --permission r` for read-only snapshots
 - `lvs`-based snapshot enumeration
 - `lvremove`-based snapshot deletion
+- `dd`-based image export from logical volumes
+- `dd`-based image restore into logical volumes
 
 The ZFS provider now implements snapshot planning and execution through the ZFS CLI for:
 
@@ -89,6 +91,7 @@ The current CLI surface includes:
 - `vb-backup --snapshot-label <name>`
 - `vb-backup --snapshot-read-write`
 - `vb-restore --base-snapshot <id>`
+- `vb-restore --force` for destructive block-level restore backends such as LVM
 
 ## Validation And Testing
 The project currently has unit tests for:
@@ -98,6 +101,7 @@ The project currently has unit tests for:
 - Linux provider registry behavior
 - Btrfs snapshot planning and output parsing
 - Btrfs send/receive planning
+- LVM backup/restore planning
 
 Validated commands so far:
 
@@ -107,3 +111,4 @@ Validated commands so far:
 - `cargo run --bin vb-snapshot -- capabilities --provider btrfs`
 - `cargo run --bin vb-backup -- --help`
 - `cargo run --bin vb-restore -- --help`
+- `sudo bash scripts/integration/lvm-snapshot.sh`

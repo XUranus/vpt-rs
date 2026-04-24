@@ -31,12 +31,15 @@ Implemented:
 - logical volume path parsing
 - snapshot create/list/delete through the LVM CLI
 - read-only snapshot permission adjustment after creation
+- image-file backup through `dd`
+- image-file restore through `dd`
+- temporary snapshot policy for backup planning
+- explicit `--force` guard for destructive restore
 
 Not implemented:
 
-- restore/copy semantics for logical volumes
 - mount/unmount flows
-- privileged integration tests against a real LVM environment
+- incremental/differential export semantics
 
 ### ZFS
 Status: partially implemented.

@@ -27,7 +27,9 @@ const LVCREATE_BIN: &str = "lvcreate";
 const LVREMOVE_BIN: &str = "lvremove";
 const LVCHANGE_BIN: &str = "lvchange";
 const LVS_BIN: &str = "lvs";
+const DD_BIN: &str = "dd";
 const DEFAULT_SNAPSHOT_SIZE: &str = "20%ORIGIN";
+const DEFAULT_COPY_BLOCK_SIZE: &str = "4M";
 
 #[derive(Debug, Clone)]
 pub struct LvmBackend(StubBackend);
@@ -52,6 +54,22 @@ pub struct LvmSnapshotPlan {
     pub snapshot_path: PathBuf,
     pub read_only: bool,
     pub commands: Vec<LvmCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LvmBackupPlan {
+    pub source: LvmVolumeRef,
+    pub target: PathBuf,
+    pub temporary_snapshot: Option<LvmSnapshotPlan>,
+    pub copy_command: LvmCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LvmRestorePlan {
+    pub source: PathBuf,
+    pub destination: LvmVolumeRef,
+    pub force: bool,
+    pub copy_command: LvmCommand,
 }
 
 impl LvmCommand {
@@ -183,6 +201,103 @@ impl LvmBackend {
         Ok((volume, command))
     }
 
+    pub fn plan_backup(&self, plan: &BackupPlan) -> Result<LvmBackupPlan> {
+        let source = match &plan.source {
+            crate::types::BackupSource::Volume(source) => self.parse_volume_ref(source)?,
+            crate::types::BackupSource::Snapshot(snapshot) => {
+                self.parse_volume_ref(&VolumeRef::new(snapshot.id.clone()))?
+            }
+        };
+
+        let target = match &plan.target {
+            crate::types::BackupTarget::ImageFile(path) => path.clone(),
+            crate::types::BackupTarget::Device(path) => {
+                return Err(Error::InvalidArgument {
+                    message: format!(
+                        "lvm backup currently supports only image-file targets, got `{}`",
+                        path.display()
+                    ),
+                });
+            }
+        };
+
+        let temporary_snapshot = match (&plan.source, &plan.snapshot_policy) {
+            (crate::types::BackupSource::Volume(source), crate::types::SnapshotPolicy::Temporary { kind, label, .. }) => {
+                Some(self.plan_create_snapshot(&SnapshotRequest {
+                    source: source.clone(),
+                    kind: *kind,
+                    label: label.clone(),
+                    read_only: true,
+                })?)
+            }
+            _ => None,
+        };
+
+        let copy_source = temporary_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.snapshot_path.clone())
+            .unwrap_or_else(|| source.lv_path.clone());
+
+        let copy_command = LvmCommand::new(
+            DD_BIN,
+            vec![
+                format!("if={}", copy_source.display()),
+                format!("of={}", target.display()),
+                format!("bs={DEFAULT_COPY_BLOCK_SIZE}"),
+                "iflag=fullblock".to_string(),
+                "conv=fsync".to_string(),
+                "status=none".to_string(),
+            ],
+        );
+
+        Ok(LvmBackupPlan {
+            source,
+            target,
+            temporary_snapshot,
+            copy_command,
+        })
+    }
+
+    pub fn plan_restore(&self, plan: &RestorePlan) -> Result<LvmRestorePlan> {
+        let source = match &plan.source {
+            crate::types::BackupTarget::ImageFile(path) => path.clone(),
+            crate::types::BackupTarget::Device(path) => {
+                return Err(Error::InvalidArgument {
+                    message: format!(
+                        "lvm restore currently supports only image-file sources, got `{}`",
+                        path.display()
+                    ),
+                });
+            }
+        };
+
+        if !plan.force {
+            return Err(Error::InvalidArgument {
+                message: "lvm restore requires `--force` because it overwrites the destination logical volume".to_string(),
+            });
+        }
+
+        let destination = self.parse_volume_ref(&plan.destination)?;
+        let copy_command = LvmCommand::new(
+            DD_BIN,
+            vec![
+                format!("if={}", source.display()),
+                format!("of={}", destination.lv_path.display()),
+                format!("bs={DEFAULT_COPY_BLOCK_SIZE}"),
+                "iflag=fullblock".to_string(),
+                "conv=fsync".to_string(),
+                "status=none".to_string(),
+            ],
+        );
+
+        Ok(LvmRestorePlan {
+            source,
+            destination,
+            force: plan.force,
+            copy_command,
+        })
+    }
+
     fn run_command(&self, command: &LvmCommand) -> Result<std::process::Output> {
         process::run_command(
             self.backend_name(),
@@ -307,13 +422,50 @@ impl BlockDeviceCopier for LvmBackend {
         self.0.capabilities()
     }
 
-    fn backup_volume(&self, _plan: &BackupPlan) -> Result<()> {
-        let error = Error::UnsupportedOperation {
-            operation: "backup_volume",
-            backend: self.backend_name(),
-        };
-        error!(backend = self.backend_name(), error = %error, "backup_volume failed");
-        Err(error)
+    fn backup_volume(&self, plan: &BackupPlan) -> Result<()> {
+        info!(backend = self.backend_name(), source = %plan.source, "backup_volume called");
+        let result = (|| {
+            let plan = self.plan_backup(plan)?;
+
+            if let Some(snapshot) = &plan.temporary_snapshot {
+                for command in &snapshot.commands {
+                    self.run_command(command)?;
+                }
+            }
+
+            let copy_result = self.run_command(&plan.copy_command);
+            let cleanup_result = if let Some(snapshot) = &plan.temporary_snapshot {
+                self.run_command(&LvmCommand::new(
+                    LVREMOVE_BIN,
+                    vec![
+                        "--yes".to_string(),
+                        snapshot.snapshot_path.display().to_string(),
+                    ],
+                ))
+                .map(|_| ())
+            } else {
+                Ok(())
+            };
+
+            match (copy_result, cleanup_result) {
+                (Ok(_), Ok(())) => Ok(()),
+                (Err(error), Ok(())) => Err(error),
+                (Ok(_), Err(error)) => Err(error),
+                (Err(error), Err(cleanup_error)) => {
+                    error!(
+                        backend = self.backend_name(),
+                        source = %plan.source.lv_path.display(),
+                        cleanup_error = %cleanup_error,
+                        "backup cleanup failed after copy error"
+                    );
+                    Err(error)
+                }
+            }
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), source = %plan.source, error = %error, "backup_volume failed");
+        }
+        result
     }
 }
 
@@ -326,13 +478,17 @@ impl RestorePlanner for LvmBackend {
         self.0.capabilities()
     }
 
-    fn restore_volume(&self, _plan: &RestorePlan) -> Result<()> {
-        let error = Error::UnsupportedOperation {
-            operation: "restore_volume",
-            backend: self.backend_name(),
-        };
-        error!(backend = self.backend_name(), error = %error, "restore_volume failed");
-        Err(error)
+    fn restore_volume(&self, plan: &RestorePlan) -> Result<()> {
+        info!(backend = self.backend_name(), destination = %plan.destination, "restore_volume called");
+        let result = (|| {
+            let plan = self.plan_restore(plan)?;
+            self.run_command(&plan.copy_command)?;
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), destination = %plan.destination, error = %error, "restore_volume failed");
+        }
+        result
     }
 }
 
@@ -396,6 +552,7 @@ fn sanitize_snapshot_segment(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{BackupSource, BackupTarget, SnapshotPolicy};
 
     #[test]
     fn parses_standard_lvm_volume_path() {
@@ -479,5 +636,96 @@ snap2|data|/dev/vg0/snap2|Swi-a-r---
             .unwrap_err();
 
         assert!(matches!(error, Error::MissingCapability { .. }));
+    }
+
+    #[test]
+    fn backup_plan_uses_temporary_snapshot_for_live_volume() {
+        let backend = LvmBackend::new();
+        let plan = backend
+            .plan_backup(&BackupPlan {
+                source: BackupSource::Volume(VolumeRef::new("/dev/vg0/data")),
+                target: BackupTarget::ImageFile(PathBuf::from("/tmp/data.img")),
+                snapshot_policy: SnapshotPolicy::temporary(
+                    SnapshotKind::CrashConsistent,
+                    Some("backup snap".to_string()),
+                    true,
+                ),
+                parent_snapshot: None,
+            })
+            .unwrap();
+
+        let snapshot = plan.temporary_snapshot.expect("temporary snapshot");
+        assert_eq!(snapshot.snapshot_path, PathBuf::from("/dev/vg0/backup-snap"));
+        assert_eq!(
+            plan.copy_command.args,
+            vec![
+                "if=/dev/vg0/backup-snap",
+                "of=/tmp/data.img",
+                "bs=4M",
+                "iflag=fullblock",
+                "conv=fsync",
+                "status=none",
+            ]
+        );
+    }
+
+    #[test]
+    fn backup_plan_uses_explicit_snapshot_source_without_temporary_snapshot() {
+        let backend = LvmBackend::new();
+        let plan = backend
+            .plan_backup(&BackupPlan {
+                source: BackupSource::Snapshot(
+                    crate::types::SnapshotRef::new("/dev/vg0/snap1")
+                        .with_origin(VolumeRef::new("/dev/vg0/data")),
+                ),
+                target: BackupTarget::ImageFile(PathBuf::from("/tmp/snap.img")),
+                snapshot_policy: SnapshotPolicy::disabled(),
+                parent_snapshot: None,
+            })
+            .unwrap();
+
+        assert!(plan.temporary_snapshot.is_none());
+        assert_eq!(plan.copy_command.args[0], "if=/dev/vg0/snap1");
+    }
+
+    #[test]
+    fn restore_plan_requires_force_flag() {
+        let backend = LvmBackend::new();
+        let error = backend
+            .plan_restore(&RestorePlan {
+                source: BackupTarget::ImageFile(PathBuf::from("/tmp/data.img")),
+                destination: VolumeRef::new("/dev/vg0/restore"),
+                force: false,
+                base_snapshot: None,
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, Error::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn restore_plan_uses_dd_to_write_image_into_lv() {
+        let backend = LvmBackend::new();
+        let plan = backend
+            .plan_restore(&RestorePlan {
+                source: BackupTarget::ImageFile(PathBuf::from("/tmp/data.img")),
+                destination: VolumeRef::new("/dev/vg0/restore"),
+                force: true,
+                base_snapshot: None,
+            })
+            .unwrap();
+
+        assert_eq!(plan.destination.lv_path, PathBuf::from("/dev/vg0/restore"));
+        assert_eq!(
+            plan.copy_command.args,
+            vec![
+                "if=/tmp/data.img",
+                "of=/dev/vg0/restore",
+                "bs=4M",
+                "iflag=fullblock",
+                "conv=fsync",
+                "status=none",
+            ]
+        );
     }
 }
