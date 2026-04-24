@@ -24,6 +24,9 @@ const CAPABILITIES: &[Capability] = &[
 ];
 
 const BTRFS_BIN: &str = "btrfs";
+const MOUNT_BIN: &str = "mount";
+const UMOUNT_BIN: &str = "umount";
+const TEMP_MOUNT_PREFIX: &str = "vpt-btrfs-mount-";
 
 #[derive(Debug, Clone)]
 pub struct BtrfsBackend(StubBackend);
@@ -65,6 +68,14 @@ pub struct BtrfsReceivePlan {
     pub stream: PathBuf,
     pub destination_dir: PathBuf,
     pub command: BtrfsCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtrfsMountPlan {
+    pub snapshot_path: PathBuf,
+    pub mount_point: PathBuf,
+    pub auto_created_target: bool,
+    pub commands: Vec<BtrfsCommand>,
 }
 
 impl BtrfsBackend {
@@ -212,6 +223,75 @@ impl BtrfsBackend {
             destination_dir,
             command,
         })
+    }
+
+    pub fn plan_mount_snapshot(&self, request: &MountRequest) -> Result<BtrfsMountPlan> {
+        let snapshot_path = self.snapshot_handle_path(&request.snapshot)?;
+        if !snapshot_path.exists() {
+            return Err(Error::MissingPath {
+                path: snapshot_path.clone(),
+            });
+        }
+
+        let (mount_point, auto_created_target) = match &request.target {
+            Some(target) => (target.clone(), false),
+            None => (
+                std::env::temp_dir().join(format!(
+                    "{TEMP_MOUNT_PREFIX}{}",
+                    sanitize_label(
+                        snapshot_path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("snapshot")
+                    )
+                )),
+                true,
+            ),
+        };
+
+        let mut commands = vec![BtrfsCommand {
+            program: MOUNT_BIN,
+            args: vec![
+                "--bind".to_string(),
+                snapshot_path.display().to_string(),
+                mount_point.display().to_string(),
+            ],
+        }];
+
+        if matches!(request.mode, crate::types::MountMode::ReadOnly) {
+            commands.push(BtrfsCommand {
+                program: MOUNT_BIN,
+                args: vec![
+                    "-o".to_string(),
+                    "remount,bind,ro".to_string(),
+                    mount_point.display().to_string(),
+                ],
+            });
+        }
+
+        Ok(BtrfsMountPlan {
+            snapshot_path,
+            mount_point,
+            auto_created_target,
+            commands,
+        })
+    }
+
+    pub fn plan_unmount(&self, handle: &MountHandle) -> Result<(PathBuf, BtrfsCommand)> {
+        if handle.mount_point.as_os_str().is_empty() {
+            return Err(Error::InvalidArgument {
+                message: "mount point must not be empty".to_string(),
+            });
+        }
+
+        let mount_point = handle.mount_point.clone();
+        Ok((
+            mount_point.clone(),
+            BtrfsCommand {
+                program: UMOUNT_BIN,
+                args: vec![mount_point.display().to_string()],
+            },
+        ))
     }
 
     fn validate_snapshot_request(&self, request: &SnapshotRequest) -> Result<()> {
@@ -496,22 +576,39 @@ impl MountManager for BtrfsBackend {
         self.0.capabilities()
     }
 
-    fn mount_snapshot(&self, _request: &MountRequest) -> Result<MountHandle> {
-        let error = Error::UnsupportedOperation {
-            operation: "mount_snapshot",
-            backend: self.backend_name(),
-        };
-        error!(backend = self.backend_name(), error = %error, "mount_snapshot failed");
-        Err(error)
+    fn mount_snapshot(&self, request: &MountRequest) -> Result<MountHandle> {
+        info!(backend = self.backend_name(), snapshot = %request.snapshot.id, "mount_snapshot called");
+        let result = (|| {
+            let plan = self.plan_mount_snapshot(request)?;
+            std::fs::create_dir_all(&plan.mount_point)?;
+            for command in &plan.commands {
+                self.run_command(command)?;
+            }
+            Ok(MountHandle {
+                id: plan.mount_point.display().to_string(),
+                mount_point: plan.mount_point,
+            })
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), snapshot = %request.snapshot.id, error = %error, "mount_snapshot failed");
+        }
+        result
     }
 
-    fn unmount(&self, _handle: &MountHandle) -> Result<()> {
-        let error = Error::UnsupportedOperation {
-            operation: "unmount",
-            backend: self.backend_name(),
-        };
-        error!(backend = self.backend_name(), error = %error, "unmount failed");
-        Err(error)
+    fn unmount(&self, handle: &MountHandle) -> Result<()> {
+        info!(backend = self.backend_name(), mount_point = %handle.mount_point.display(), "unmount called");
+        let result = (|| {
+            let (mount_point, command) = self.plan_unmount(handle)?;
+            self.run_command(&command)?;
+            if is_temporary_mount_path(&mount_point) {
+                let _ = std::fs::remove_dir(&mount_point);
+            }
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            error!(backend = self.backend_name(), mount_point = %handle.mount_point.display(), error = %error, "unmount failed");
+        }
+        result
     }
 }
 
@@ -546,9 +643,19 @@ fn default_snapshot_name(source: &Path) -> String {
     format!("{stem}-{ts}")
 }
 
+fn is_temporary_mount_path(path: &Path) -> bool {
+    path.parent() == Some(std::env::temp_dir().as_path())
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.starts_with(TEMP_MOUNT_PREFIX))
+            .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::MountMode;
 
     #[test]
     fn create_plan_uses_hidden_snapshot_directory() {
@@ -724,6 +831,69 @@ ID 259 gen 302 top level 5 path /mnt/data/.vb-snapshots/snap-2
             plan.command.args,
             vec!["receive", plan.destination_dir.to_string_lossy().as_ref()]
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mount_plan_uses_bind_mount_and_read_only_remount() {
+        let backend = BtrfsBackend::new();
+        let root =
+            std::env::temp_dir().join(format!("vpt-rs-btrfs-mount-{}", std::process::id()));
+        let snapshot = root.join("snap");
+        std::fs::create_dir_all(&snapshot).unwrap();
+
+        let plan = backend
+            .plan_mount_snapshot(&MountRequest {
+                snapshot: SnapshotHandle {
+                    id: snapshot.display().to_string(),
+                    source: VolumeRef::new("/tmp/source"),
+                },
+                mode: MountMode::ReadOnly,
+                target: Some(PathBuf::from("/mnt/btrfs-snapshot")),
+            })
+            .unwrap();
+
+        assert_eq!(plan.commands.len(), 2);
+        assert_eq!(plan.commands[0].program, MOUNT_BIN);
+        assert_eq!(
+            plan.commands[0].args,
+            vec![
+                "--bind",
+                snapshot.to_string_lossy().as_ref(),
+                "/mnt/btrfs-snapshot"
+            ]
+        );
+        assert_eq!(
+            plan.commands[1].args,
+            vec!["-o", "remount,bind,ro", "/mnt/btrfs-snapshot"]
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mount_plan_generates_temporary_target_when_missing() {
+        let backend = BtrfsBackend::new();
+        let root =
+            std::env::temp_dir().join(format!("vpt-rs-btrfs-temp-mount-{}", std::process::id()));
+        let snapshot = root.join("nightly snapshot");
+        std::fs::create_dir_all(&snapshot).unwrap();
+
+        let plan = backend
+            .plan_mount_snapshot(&MountRequest {
+                snapshot: SnapshotHandle {
+                    id: snapshot.display().to_string(),
+                    source: VolumeRef::new("/tmp/source"),
+                },
+                mode: MountMode::ReadWrite,
+                target: None,
+            })
+            .unwrap();
+
+        assert!(plan.auto_created_target);
+        assert!(is_temporary_mount_path(&plan.mount_point));
+        assert_eq!(plan.commands.len(), 1);
 
         let _ = std::fs::remove_dir_all(&root);
     }

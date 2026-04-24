@@ -23,6 +23,7 @@ The repository now includes filesystem-backed integration scripts under `scripts
 - creates a loopback Btrfs filesystem
 - creates a source subvolume
 - runs `vb-snapshot create/list`
+- mounts the manual snapshot through `vb-mount`, reads the test file, and unmounts it
 - runs `vb-backup` and `vb-restore`
 - validates that restored file content exists
 - validates that the temporary backup snapshot is removed

@@ -10,6 +10,7 @@ Implemented:
 - snapshot create/list/delete
 - send-based backup to a stream file
 - receive-based restore from a stream file
+- snapshot mount/unmount through bind mount + remount
 - capability reporting and CLI selection
 - temporary snapshot policy for backup planning
 - parent snapshot support in send planning
@@ -17,7 +18,6 @@ Implemented:
 
 Not implemented:
 
-- mount/unmount flows
 - privileged round-trip integration tests against a real Btrfs filesystem
 
 ### LVM

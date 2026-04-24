@@ -15,9 +15,11 @@ RESTORE_ROOT="${MOUNT_PATH}/restore-root"
 SOURCE_SUBVOL="${MOUNT_PATH}/source-subvol"
 STREAM_PATH="${COPY_DIR}/${TEST_NAME}.stream"
 MANUAL_SNAPSHOT_PATH="${MOUNT_PATH}/.vb-snapshots/integ"
+SNAPSHOT_MOUNT="${MOUNT_PATH}/snapshot-mount"
 
 cleanup() {
   set +e
+  umount "${SNAPSHOT_MOUNT}" >/dev/null 2>&1 || true
   if mountpoint -q "${MOUNT_PATH}"; then
     umount "${MOUNT_PATH}"
   fi
@@ -43,11 +45,15 @@ mount "${LOOP_DEVICE}" "${MOUNT_PATH}"
 
 btrfs subvolume create "${SOURCE_SUBVOL}"
 mkdir -p "${RESTORE_ROOT}"
+mkdir -p "${SNAPSHOT_MOUNT}"
 printf 'hello-from-btrfs\n' > "${SOURCE_SUBVOL}/hello.txt"
 
 cd "${ROOT_DIR}"
 ./target/release/vb-snapshot create --provider btrfs --label integ "${SOURCE_SUBVOL}"
 ./target/release/vb-snapshot list --provider btrfs "${SOURCE_SUBVOL}"
+./target/release/vb-mount mount --provider btrfs --target "${SNAPSHOT_MOUNT}" "${MANUAL_SNAPSHOT_PATH}"
+grep -q 'hello-from-btrfs' "${SNAPSHOT_MOUNT}/hello.txt"
+./target/release/vb-mount unmount --provider btrfs "${SNAPSHOT_MOUNT}"
 ./target/release/vb-backup --provider btrfs --output "${STREAM_PATH}" "${SOURCE_SUBVOL}"
 ./target/release/vb-restore --provider btrfs --input "${STREAM_PATH}" "${RESTORE_ROOT}"
 

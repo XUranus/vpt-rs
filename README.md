@@ -13,7 +13,7 @@ The crate already exposes:
 
 Linux providers currently implemented:
 
-- `btrfs`: snapshot create/list/delete, `send` backup, `receive` restore
+- `btrfs`: snapshot create/list/delete, `send` backup, `receive` restore, snapshot mount/unmount
 - `lvm`: snapshot create/list/delete, image backup/restore, snapshot mount/unmount
 - `zfs`: snapshot create/list/delete, `send` backup, `receive` restore
 
@@ -41,6 +41,7 @@ Provider-specific demos:
 ```bash
 ./target/release/vb-snapshot backend list
 ./target/release/vb-backup --provider btrfs --output /tmp/backup.stream /path/to/subvol
+./target/release/vb-mount mount --provider btrfs /path/to/.vb-snapshots/snap0
 ./target/release/vb-restore --provider lvm --force --input /tmp/volume.img /dev/vg0/restore
 ./target/release/vb-mount mount --provider lvm /dev/vg0/snap0
 ```

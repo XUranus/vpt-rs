@@ -40,6 +40,7 @@ The Btrfs provider is the first provider with real snapshot logic. It currently 
 - `btrfs subvolume snapshot`
 - `btrfs subvolume list -s`
 - `btrfs subvolume delete`
+- bind-mount based snapshot mount/unmount
 
 The LVM provider now implements snapshot planning and execution through the LVM CLI for:
 
@@ -103,6 +104,7 @@ The project currently has unit tests for:
 - Linux provider registry behavior
 - Btrfs snapshot planning and output parsing
 - Btrfs send/receive planning
+- Btrfs mount/unmount planning
 - LVM backup/restore planning
 - LVM mount/unmount planning
 
