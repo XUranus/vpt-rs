@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE_DIR="${IMAGE_DIR:-/opt/volumeset}"
 COPY_DIR="${COPY_DIR:-/opt/volumeset/copy}"
 MOUNT_ROOT="${MOUNT_ROOT:-/mnt/volmnt}"
+ASSERT_RESTORE_CONTENTS="${ASSERT_RESTORE_CONTENTS:-1}"
+ASSERT_SNAPSHOT_CLEANUP="${ASSERT_SNAPSHOT_CLEANUP:-1}"
 TEST_NAME="vpt-btrfs"
 IMAGE_PATH="${IMAGE_DIR}/${TEST_NAME}.img"
 LOOP_DEVICE=""
@@ -12,6 +14,7 @@ MOUNT_PATH="${MOUNT_ROOT}/${TEST_NAME}"
 RESTORE_ROOT="${MOUNT_PATH}/restore-root"
 SOURCE_SUBVOL="${MOUNT_PATH}/source-subvol"
 STREAM_PATH="${COPY_DIR}/${TEST_NAME}.stream"
+MANUAL_SNAPSHOT_PATH="${MOUNT_PATH}/.vb-snapshots/integ"
 
 cleanup() {
   set +e
@@ -48,11 +51,28 @@ cd "${ROOT_DIR}"
 ./target/release/vb-backup --provider btrfs --output "${STREAM_PATH}" "${SOURCE_SUBVOL}"
 ./target/release/vb-restore --provider btrfs --input "${STREAM_PATH}" "${RESTORE_ROOT}"
 
-RESTORED_FILE="$(find "${RESTORE_ROOT}" -type f -name hello.txt | head -n 1)"
-if [[ -z "${RESTORED_FILE}" ]]; then
-  echo "restored file not found" >&2
-  exit 1
+if [[ "${ASSERT_RESTORE_CONTENTS}" == "1" ]]; then
+  RESTORED_FILE="$(find "${RESTORE_ROOT}" -type f -name hello.txt | head -n 1)"
+  if [[ -z "${RESTORED_FILE}" ]]; then
+    echo "restored file not found" >&2
+    exit 1
+  fi
+
+  grep -q 'hello-from-btrfs' "${RESTORED_FILE}"
 fi
 
-grep -q 'hello-from-btrfs' "${RESTORED_FILE}"
+if [[ "${ASSERT_SNAPSHOT_CLEANUP}" == "1" ]]; then
+  if find "${MOUNT_PATH}/.vb-snapshots" -maxdepth 1 -mindepth 1 -name 'source-subvol-*' | grep -q .; then
+    echo "temporary backup snapshot was not cleaned up" >&2
+    exit 1
+  fi
+
+  ./target/release/vb-snapshot delete --provider btrfs "${MANUAL_SNAPSHOT_PATH}"
+  SNAPSHOT_LIST_OUTPUT="$(./target/release/vb-snapshot list --provider btrfs "${SOURCE_SUBVOL}")"
+  if grep -Fq "${MANUAL_SNAPSHOT_PATH}" <<<"${SNAPSHOT_LIST_OUTPUT}"; then
+    echo "manual btrfs snapshot still listed after delete" >&2
+    exit 1
+  fi
+fi
+
 echo "btrfs roundtrip ok"

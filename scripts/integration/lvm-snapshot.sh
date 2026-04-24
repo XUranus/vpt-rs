@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE_DIR="${IMAGE_DIR:-/opt/volumeset}"
 MOUNT_ROOT="${MOUNT_ROOT:-/mnt/volmnt}"
+ASSERT_SNAPSHOT_CLEANUP="${ASSERT_SNAPSHOT_CLEANUP:-1}"
 TEST_NAME="vpt-lvm"
 IMAGE_PATH="${IMAGE_DIR}/${TEST_NAME}.img"
 LOOP_DEVICE=""
@@ -13,7 +14,7 @@ SNAP_NAME="integ-lvm"
 
 cleanup() {
   set +e
-  cargo run --manifest-path "${ROOT_DIR}/Cargo.toml" --bin vb-snapshot -- delete --provider lvm "/dev/${VG_NAME}/${SNAP_NAME}" >/dev/null 2>&1 || true
+  ./target/release/vb-snapshot delete --provider lvm "/dev/${VG_NAME}/${SNAP_NAME}" >/dev/null 2>&1 || true
   lvremove -fy "/dev/${VG_NAME}/${LV_NAME}" >/dev/null 2>&1 || true
   vgremove -fy "${VG_NAME}" >/dev/null 2>&1 || true
   pvremove -fy "${LOOP_DEVICE}" >/dev/null 2>&1 || true
@@ -40,5 +41,13 @@ cd "${ROOT_DIR}"
 ./target/release/vb-snapshot create --provider lvm --label "${SNAP_NAME}" /dev/${VG_NAME}/${LV_NAME}
 ./target/release/vb-snapshot list --provider lvm /dev/${VG_NAME}/${LV_NAME}
 ./target/release/vb-snapshot delete --provider lvm /dev/${VG_NAME}/${SNAP_NAME}
+
+if [[ "${ASSERT_SNAPSHOT_CLEANUP}" == "1" ]]; then
+  SNAPSHOT_LIST_OUTPUT="$(./target/release/vb-snapshot list --provider lvm /dev/${VG_NAME}/${LV_NAME})"
+  if grep -Fq "/dev/${VG_NAME}/${SNAP_NAME}" <<<"${SNAPSHOT_LIST_OUTPUT}"; then
+    echo "lvm snapshot still listed after delete" >&2
+    exit 1
+  fi
+fi
 
 echo "lvm snapshot lifecycle ok"

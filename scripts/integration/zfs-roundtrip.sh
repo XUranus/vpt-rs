@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE_DIR="${IMAGE_DIR:-/opt/volumeset}"
 COPY_DIR="${COPY_DIR:-/opt/volumeset/copy}"
 MOUNT_ROOT="${MOUNT_ROOT:-/mnt/volmnt}"
+ASSERT_RESTORE_CONTENTS="${ASSERT_RESTORE_CONTENTS:-1}"
+ASSERT_SNAPSHOT_CLEANUP="${ASSERT_SNAPSHOT_CLEANUP:-1}"
 TEST_NAME="vpt-zfs"
 IMAGE_PATH="${IMAGE_DIR}/${TEST_NAME}.img"
 POOL_NAME="vptpool"
@@ -41,5 +43,17 @@ cd "${ROOT_DIR}"
 ./target/release/vb-restore --provider zfs --force --input "${STREAM_PATH}" "${RESTORE_DATASET}"
 
 zfs list "${RESTORE_DATASET}" >/dev/null
-grep -q 'hello-from-zfs' "${RESTORE_MOUNT}/hello.txt"
+if [[ "${ASSERT_RESTORE_CONTENTS}" == "1" ]]; then
+  grep -q 'hello-from-zfs' "${RESTORE_MOUNT}/hello.txt"
+fi
+
+if [[ "${ASSERT_SNAPSHOT_CLEANUP}" == "1" ]]; then
+  ./target/release/vb-snapshot delete --provider zfs "${DATASET_NAME}@snap1"
+  SNAPSHOT_LIST_OUTPUT="$(./target/release/vb-snapshot list --provider zfs "${DATASET_NAME}")"
+  if grep -Fq "${DATASET_NAME}@snap1" <<<"${SNAPSHOT_LIST_OUTPUT}"; then
+    echo "zfs snapshot still listed after delete" >&2
+    exit 1
+  fi
+fi
+
 echo "zfs roundtrip ok"
