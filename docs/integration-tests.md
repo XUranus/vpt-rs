@@ -22,8 +22,8 @@ The repository now includes filesystem-backed integration scripts under `scripts
 ### Btrfs
 - creates a loopback Btrfs filesystem
 - creates a source subvolume
-- runs `vb-snapshot create/list`
-- runs `vb-backup` and `vb-restore`
+- runs `vptcli snapshot create/list`
+- runs `vptcli backup` and `vptcli restore`
 - validates that restored file content exists
 - validates that the temporary backup snapshot is removed
 - deletes the manual snapshot and verifies it is no longer listed
@@ -31,18 +31,18 @@ The repository now includes filesystem-backed integration scripts under `scripts
 ### LVM
 - creates a loopback PV/VG/LV
 - formats source and restore logical volumes as `ext4`
-- runs `vb-snapshot create/list/delete`
-- runs `vb-backup` to export the source LV to an image file
-- runs `vb-restore --force` to write that image into a restore LV
+- runs `vptcli snapshot create/list/delete`
+- runs `vptcli backup` to export the source LV to an image file
+- runs `vptcli restore --force` to write that image into a restore LV
 - validates restored file content
 - verifies that the deleted snapshot is no longer listed
 
 ### ZFS
 - creates a file-backed zpool
 - creates a dataset and snapshot
-- runs `vb-snapshot list`
-- runs `vb-backup` from an explicit snapshot source
-- runs `vb-restore --force` into a destination dataset
+- runs `vptcli snapshot list`
+- runs `vptcli backup` from an explicit snapshot source
+- runs `vptcli restore --force` into a destination dataset
 - validates restored file content
 - deletes the source snapshot and verifies it is no longer listed
 

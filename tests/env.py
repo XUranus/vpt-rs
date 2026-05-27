@@ -5,7 +5,7 @@ Provides:
 - Required command availability checks with clear messages
 - UUID-based artifact isolation
 - Loop device lifecycle management
-- CLI wrappers for vb-snapshot / vb-backup / vb-restore
+- CLI wrappers for vptcli (snapshot, backup, restore subcommands)
 - Structured logging to per-test log files
 - CLI tracing (RUST_LOG) captured to per-test cli.log
 
@@ -38,7 +38,7 @@ MOUNT_ROOT_DEFAULT = "/tmp/testvolumemnt"
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%H:%M:%S"
 
-BINARY_NAMES = ("vb-snapshot", "vb-backup", "vb-restore")
+BINARY_NAMES = ("vptcli",)
 
 # Per-provider required system commands
 PROVIDER_COMMANDS = {
@@ -339,31 +339,31 @@ def snapshot_create(
     label: Optional[str] = None,
     read_only: bool = True,
 ) -> Tuple[int, str, str]:
-    """Run vb-snapshot create."""
-    args = ["create", "--provider", provider]
+    """Run vptcli snapshot create."""
+    args = ["snapshot", "create", "--provider", provider]
     if label:
         args += ["--label", label]
     if not read_only:
         args += ["--read-write"]
     args.append(volume)
-    return _cli(env, "vb-snapshot", args)
+    return _cli(env, "vptcli", args)
 
 
 def snapshot_list(
     env: TestEnv, provider: str, volume: str
 ) -> Tuple[int, str, str]:
-    """Run vb-snapshot list."""
+    """Run vptcli snapshot list."""
     return _cli(
-        env, "vb-snapshot", ["list", "--provider", provider, volume]
+        env, "vptcli", ["snapshot", "list", "--provider", provider, volume]
     )
 
 
 def snapshot_delete(
     env: TestEnv, provider: str, snapshot_id: str
 ) -> Tuple[int, str, str]:
-    """Run vb-snapshot delete."""
+    """Run vptcli snapshot delete."""
     return _cli(
-        env, "vb-snapshot", ["delete", "--provider", provider, snapshot_id]
+        env, "vptcli", ["snapshot", "delete", "--provider", provider, snapshot_id]
     )
 
 
@@ -374,12 +374,12 @@ def backup(
     output: str,
     snapshot_source: bool = False,
 ) -> Tuple[int, str, str]:
-    """Run vb-backup."""
-    args = ["--provider", provider, "--output", output]
+    """Run vptcli backup."""
+    args = ["backup", "--provider", provider, "--output", output]
     if snapshot_source:
         args.append("--snapshot-source")
     args.append(source)
-    return _cli(env, "vb-backup", args)
+    return _cli(env, "vptcli", args)
 
 
 def restore(
@@ -389,9 +389,9 @@ def restore(
     destination: str,
     force: bool = False,
 ) -> Tuple[int, str, str]:
-    """Run vb-restore."""
-    args = ["--provider", provider, "--input", input_file]
+    """Run vptcli restore."""
+    args = ["restore", "--provider", provider, "--input", input_file]
     if force:
         args.append("--force")
     args.append(destination)
-    return _cli(env, "vb-restore", args)
+    return _cli(env, "vptcli", args)

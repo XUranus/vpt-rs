@@ -49,7 +49,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           asset="vpt-rs-${tag}-${{ matrix.target }}.tar.gz"
           cd target/${{ matrix.target }}/release
-          tar czf "../../../${asset}" vb-backup vb-restore vb-snapshot
+          tar czf "../../../${asset}" vptcli
 
       - name: Package (zip)
         if: matrix.archive == 'zip'
@@ -58,7 +58,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           asset="vpt-rs-${tag}-${{ matrix.target }}.zip"
           cd target/${{ matrix.target }}/release
-          7z a "../../../${asset}" vb-backup.exe vb-restore.exe vb-snapshot.exe
+          7z a "../../../${asset}" vptcli.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

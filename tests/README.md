@@ -1,7 +1,7 @@
 # vpt-rs Integration Tests
 
-Python-based integration tests that exercise `vb-snapshot`, `vb-backup`, and
-`vb-restore` CLI tools against real Linux storage providers using loop devices.
+Python-based integration tests that exercise `vptcli` CLI tool against real
+Linux storage providers using loop devices.
 
 ## Structure
 
@@ -171,7 +171,7 @@ The path is printed at the start of each test:
 
 ### CLI tool tracing log (Rust)
 
-Every `vb-snapshot`, `vb-backup`, and `vb-restore` call emits tracing output
+Every `vptcli` call emits tracing output
 (via `RUST_LOG=debug`) to a dedicated log file:
 
 ```
@@ -184,7 +184,7 @@ CLI invocation is separated by a header showing the command:
 
 ```
 ============================================================
-$ vb-backup --provider btrfs --output /tmp/.../btrfs.stream /tmp/.../btrfs/source-subvol
+$ vptcli backup --provider btrfs --output /tmp/.../btrfs.stream /tmp/.../btrfs/source-subvol
 ============================================================
  2026-05-27T08:21:03.456789Z  INFO vpt_rs::platform::linux::btrfs: create_snapshot called
  2026-05-27T08:21:03.456890Z DEBUG vpt_rs::process: starting external command command="btrfs subvolume snapshot -r ..."
@@ -256,42 +256,42 @@ Each provider test follows the same 11-step lifecycle:
 1. Volume init     Create loop device + provider-specific volume structure
 2. Mount           Mount the source volume
 3. Write data      Create 3 files: hello.txt, data.txt, sub/nested.txt
-4. Snapshot create vb-snapshot create --provider <P>
-5. Snapshot list   vb-snapshot list --provider <P> (assert in list)
-6. Backup          vb-backup --provider <P> (assert stream file exists, non-empty)
-7. Restore         vb-restore --provider <P> (assert exit 0)
+4. Snapshot create vptcli snapshot create --provider <P>
+5. Snapshot list   vptcli snapshot list --provider <P> (assert in list)
+6. Backup          vptcli backup --provider <P> (assert stream file exists, non-empty)
+7. Restore         vptcli restore --provider <P> (assert exit 0)
 8. Mount restored  Mount the restored volume for verification
 9. Verify files    Read all 3 files, assert content matches source
-10. Snapshot delete vb-snapshot delete (assert gone from list)
+10. Snapshot delete vptcli snapshot delete (assert gone from list)
 11. Teardown       Unmount, detach loop, cleanup LVs/pools
 ```
 
 ### btrfs (`test_btrfs.py`)
 
 - Volume init: `truncate` → loop → `mkfs.btrfs -f` → `mount` → `btrfs subvolume create`
-- Backup: `vb-backup` auto-creates temp snapshot, runs `btrfs send`, cleans up temp snapshot
-- Restore: `vb-restore` runs `btrfs receive` into restore directory
+- Backup: `vptcli backup` auto-creates temp snapshot, runs `btrfs send`, cleans up temp snapshot
+- Restore: `vptcli restore` runs `btrfs receive` into restore directory
 - Verify: `rglob("*.txt")` to find files in received subvolume
 
 ### lvm (`test_lvm.py`)
 
 - Volume init: `truncate` → loop → `pvcreate` → `vgcreate` → 2x `lvcreate -L 512M` → `mkfs.ext4`
-- Backup: `vb-backup` auto-creates LVM snapshot, runs `dd` to image file, cleans up snapshot
-- Restore: `vb-restore --force` runs `dd` image into destination LV
+- Backup: `vptcli backup` auto-creates LVM snapshot, runs `dd` to image file, cleans up snapshot
+- Restore: `vptcli restore --force` runs `dd` image into destination LV
 - Verify: `mount` restored LV, `cat` files, `umount`
 
 ### zfs (`test_zfs.py`)
 
 - Volume init: `truncate` → loop → `zpool create -f` → 2x `zfs create -o mountpoint=...`
-- Backup: `vb-backup --snapshot-source` runs `zfs send` on explicit snapshot
-- Restore: `vb-restore --force` runs `zfs receive -F` into restore dataset
+- Backup: `vptcli backup --snapshot-source` runs `zfs send` on explicit snapshot
+- Restore: `vptcli restore --force` runs `zfs receive -F` into restore dataset
 - Verify: `cat` files in auto-mounted dataset
 
 ### smoke (`test_smoke.py`)
 
-- `vb-snapshot backend list` — returns platform and provider info
-- `vb-snapshot capabilities --provider btrfs|lvm|zfs` — lists capabilities
-- `vb-snapshot` / `vb-backup` / `vb-restore` with no args — shows usage (exit 0)
+- `vptcli snapshot backend list` — returns platform and provider info
+- `vptcli snapshot capabilities --provider btrfs|lvm|zfs` — lists capabilities
+- `vptcli snapshot` / `vptcli backup` / `vptcli restore` with no args — shows usage (exit 0)
 - Invalid provider — returns non-zero exit code
 
 ## Coverage matrix

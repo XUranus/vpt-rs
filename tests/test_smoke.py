@@ -1,15 +1,15 @@
 """CLI smoke tests (cross-platform).
 
-Tests CLI tools for basic functionality that does not require privileged
+Tests vptcli for basic functionality that does not require privileged
 operations or platform-specific backends. These tests can run on any
 platform where the Rust binaries are available.
 
 Scenarios covered:
-    1. vb-snapshot backend list
-    2. vb-snapshot capabilities (per available provider on Linux)
-    3. vb-snapshot create with no args shows usage
-    4. vb-backup with no args shows usage
-    5. vb-restore with no args shows usage
+    1. vptcli snapshot backend list
+    2. vptcli snapshot capabilities (per available provider on Linux)
+    3. vptcli snapshot with no args shows usage
+    4. vptcli backup with no args shows usage
+    5. vptcli restore with no args shows usage
 """
 
 import os
@@ -20,12 +20,14 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from env import TestEnv, run_cmd
 
+VPTCLI = "vptcli"
+
 
 def test_backend_list(env: TestEnv):
-    """vb-snapshot backend list returns platform info."""
+    """vptcli snapshot backend list returns platform info."""
     log = env.get_logger("smoke-backend-list")
     rc, out, err = run_cmd(
-        [str(env.bin_dir / "vb-snapshot"), "backend", "list"], check=False
+        [str(env.bin_dir / VPTCLI), "snapshot", "backend", "list"], check=False
     )
     assert rc == 0, f"backend list failed: {err}"
     assert "platform:" in out, f"unexpected output: {out}"
@@ -33,7 +35,7 @@ def test_backend_list(env: TestEnv):
 
 
 def test_capabilities_linux_providers(env: TestEnv):
-    """vb-snapshot capabilities works for each Linux provider."""
+    """vptcli snapshot capabilities works for each Linux provider."""
     if platform.system() != "Linux":
         return  # skip on non-Linux
 
@@ -41,7 +43,8 @@ def test_capabilities_linux_providers(env: TestEnv):
     for provider in ("btrfs", "lvm", "zfs"):
         rc, out, err = run_cmd(
             [
-                str(env.bin_dir / "vb-snapshot"),
+                str(env.bin_dir / VPTCLI),
+                "snapshot",
                 "capabilities",
                 "--provider",
                 provider,
@@ -56,10 +59,10 @@ def test_capabilities_linux_providers(env: TestEnv):
 
 
 def test_snapshot_usage(env: TestEnv):
-    """vb-snapshot with no args shows usage (exit 0)."""
+    """vptcli snapshot with no args shows usage (exit 0)."""
     log = env.get_logger("smoke-snapshot-usage")
     rc, out, err = run_cmd(
-        [str(env.bin_dir / "vb-snapshot")], check=False
+        [str(env.bin_dir / VPTCLI), "snapshot"], check=False
     )
     assert rc == 0, f"snapshot no-args should exit 0: {err}"
     assert "create" in out.lower(), f"usage output unexpected: {out}"
@@ -67,10 +70,10 @@ def test_snapshot_usage(env: TestEnv):
 
 
 def test_backup_usage(env: TestEnv):
-    """vb-backup with no args shows usage (exit 0)."""
+    """vptcli backup with no args shows usage (exit 0)."""
     log = env.get_logger("smoke-backup-usage")
     rc, out, err = run_cmd(
-        [str(env.bin_dir / "vb-backup")], check=False
+        [str(env.bin_dir / VPTCLI), "backup"], check=False
     )
     assert rc == 0, f"backup no-args should exit 0: {err}"
     assert "--output" in out.lower(), f"usage output unexpected: {out}"
@@ -78,10 +81,10 @@ def test_backup_usage(env: TestEnv):
 
 
 def test_restore_usage(env: TestEnv):
-    """vb-restore with no args shows usage (exit 0)."""
+    """vptcli restore with no args shows usage (exit 0)."""
     log = env.get_logger("smoke-restore-usage")
     rc, out, err = run_cmd(
-        [str(env.bin_dir / "vb-restore")], check=False
+        [str(env.bin_dir / VPTCLI), "restore"], check=False
     )
     assert rc == 0, f"restore no-args should exit 0: {err}"
     assert "--input" in out.lower(), f"usage output unexpected: {out}"
@@ -89,11 +92,12 @@ def test_restore_usage(env: TestEnv):
 
 
 def test_snapshot_invalid_provider(env: TestEnv):
-    """vb-snapshot create with unknown provider returns non-zero."""
+    """vptcli snapshot create with unknown provider returns non-zero."""
     log = env.get_logger("smoke-invalid-provider")
     rc, out, err = run_cmd(
         [
-            str(env.bin_dir / "vb-snapshot"),
+            str(env.bin_dir / VPTCLI),
+            "snapshot",
             "create",
             "--provider",
             "nonexistent",

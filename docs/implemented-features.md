@@ -26,7 +26,7 @@ The shared backup model now distinguishes:
 - optional parent snapshot references for incremental-capable providers
 
 ## Implemented Snapshot Features
-`vb-snapshot` is available as a demo CLI with:
+`vptcli snapshot` is available with:
 
 - `backend` and `backend list`
 - `capabilities`
@@ -66,7 +66,7 @@ The current ZFS backup/restore flow is file-based and intentionally narrow:
 Mount-oriented ZFS workflows remain stubbed.
 
 ## Implemented Backup And Restore Features
-`vb-backup` and `vb-restore` are available as demo CLIs.
+`vptcli backup` and `vptcli restore` are available.
 
 The Btrfs provider currently implements:
 
@@ -85,13 +85,13 @@ The ZFS provider currently implements:
 
 The current CLI surface includes:
 
-- `vb-backup --snapshot-source`
-- `vb-backup --parent-snapshot <id>`
-- `vb-backup --snapshot-kind crash|application`
-- `vb-backup --snapshot-label <name>`
-- `vb-backup --snapshot-read-write`
-- `vb-restore --base-snapshot <id>`
-- `vb-restore --force` for destructive block-level restore backends such as LVM
+- `vptcli backup --snapshot-source`
+- `vptcli backup --parent-snapshot <id>`
+- `vptcli backup --snapshot-kind crash|application`
+- `vptcli backup --snapshot-label <name>`
+- `vptcli backup --snapshot-read-write`
+- `vptcli restore --base-snapshot <id>`
+- `vptcli restore --force` for destructive block-level restore backends such as LVM
 
 ## Validation And Testing
 The project currently has unit tests for:
@@ -107,8 +107,8 @@ Validated commands so far:
 
 - `cargo fmt`
 - `cargo test`
-- `cargo run --bin vb-snapshot -- backend list`
-- `cargo run --bin vb-snapshot -- capabilities --provider btrfs`
-- `cargo run --bin vb-backup -- --help`
-- `cargo run --bin vb-restore -- --help`
+- `cargo run --bin vptcli -- snapshot backend list`
+- `cargo run --bin vptcli -- snapshot capabilities --provider btrfs`
+- `cargo run --bin vptcli -- backup --help`
+- `cargo run --bin vptcli -- restore --help`
 - `sudo bash scripts/integration/lvm-snapshot.sh`
