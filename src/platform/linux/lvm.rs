@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, info};
 
 use crate::backup::BlockDeviceCopier;
+use crate::copy;
 use crate::error::{Error, Result};
 use crate::mount::MountManager;
 use crate::platform::StubBackend;
@@ -27,9 +28,7 @@ const LVCREATE_BIN: &str = "lvcreate";
 const LVREMOVE_BIN: &str = "lvremove";
 const LVCHANGE_BIN: &str = "lvchange";
 const LVS_BIN: &str = "lvs";
-const DD_BIN: &str = "dd";
 const DEFAULT_SNAPSHOT_SIZE: &str = "20%ORIGIN";
-const DEFAULT_COPY_BLOCK_SIZE: &str = "4M";
 
 #[derive(Debug, Clone)]
 pub struct LvmBackend(StubBackend);
@@ -61,7 +60,9 @@ pub struct LvmBackupPlan {
     pub source: LvmVolumeRef,
     pub target: PathBuf,
     pub temporary_snapshot: Option<LvmSnapshotPlan>,
-    pub copy_command: LvmCommand,
+    pub copy_src: PathBuf,
+    pub copy_dst: PathBuf,
+    pub block_size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,7 +70,9 @@ pub struct LvmRestorePlan {
     pub source: PathBuf,
     pub destination: LvmVolumeRef,
     pub force: bool,
-    pub copy_command: LvmCommand,
+    pub copy_src: PathBuf,
+    pub copy_dst: PathBuf,
+    pub block_size: usize,
 }
 
 impl LvmCommand {
@@ -233,28 +236,20 @@ impl LvmBackend {
             _ => None,
         };
 
-        let copy_source = temporary_snapshot
+        let copy_src = temporary_snapshot
             .as_ref()
             .map(|snapshot| snapshot.snapshot_path.clone())
             .unwrap_or_else(|| source.lv_path.clone());
 
-        let copy_command = LvmCommand::new(
-            DD_BIN,
-            vec![
-                format!("if={}", copy_source.display()),
-                format!("of={}", target.display()),
-                format!("bs={DEFAULT_COPY_BLOCK_SIZE}"),
-                "iflag=fullblock".to_string(),
-                "conv=fsync".to_string(),
-                "status=none".to_string(),
-            ],
-        );
+        let block_size = plan.block_size.unwrap_or(copy::DEFAULT_BLOCK_SIZE);
 
         Ok(LvmBackupPlan {
+            copy_dst: target.clone(),
             source,
             target,
             temporary_snapshot,
-            copy_command,
+            copy_src,
+            block_size,
         })
     }
 
@@ -278,23 +273,15 @@ impl LvmBackend {
         }
 
         let destination = self.parse_volume_ref(&plan.destination)?;
-        let copy_command = LvmCommand::new(
-            DD_BIN,
-            vec![
-                format!("if={}", source.display()),
-                format!("of={}", destination.lv_path.display()),
-                format!("bs={DEFAULT_COPY_BLOCK_SIZE}"),
-                "iflag=fullblock".to_string(),
-                "conv=fsync".to_string(),
-                "status=none".to_string(),
-            ],
-        );
+        let block_size = plan.block_size.unwrap_or(copy::DEFAULT_BLOCK_SIZE);
 
         Ok(LvmRestorePlan {
+            copy_src: source.clone(),
+            copy_dst: destination.lv_path.clone(),
             source,
             destination,
             force: plan.force,
-            copy_command,
+            block_size,
         })
     }
 
@@ -433,7 +420,7 @@ impl BlockDeviceCopier for LvmBackend {
                 }
             }
 
-            let copy_result = self.run_command(&plan.copy_command);
+            let copy_result = copy::copy_blocks(&plan.copy_src, &plan.copy_dst, plan.block_size).map(|_| ());
             let cleanup_result = if let Some(snapshot) = &plan.temporary_snapshot {
                 self.run_command(&LvmCommand::new(
                     LVREMOVE_BIN,
@@ -482,7 +469,7 @@ impl RestorePlanner for LvmBackend {
         info!(backend = self.backend_name(), destination = %plan.destination, "restore_volume called");
         let result = (|| {
             let plan = self.plan_restore(plan)?;
-            self.run_command(&plan.copy_command)?;
+            copy::copy_blocks(&plan.copy_src, &plan.copy_dst, plan.block_size)?;
             Ok(())
         })();
         if let Err(error) = &result {
@@ -651,22 +638,15 @@ snap2|data|/dev/vg0/snap2|Swi-a-r---
                     true,
                 ),
                 parent_snapshot: None,
+                block_size: None,
             })
             .unwrap();
 
         let snapshot = plan.temporary_snapshot.expect("temporary snapshot");
         assert_eq!(snapshot.snapshot_path, PathBuf::from("/dev/vg0/backup-snap"));
-        assert_eq!(
-            plan.copy_command.args,
-            vec![
-                "if=/dev/vg0/backup-snap",
-                "of=/tmp/data.img",
-                "bs=4M",
-                "iflag=fullblock",
-                "conv=fsync",
-                "status=none",
-            ]
-        );
+        assert_eq!(plan.copy_src, PathBuf::from("/dev/vg0/backup-snap"));
+        assert_eq!(plan.copy_dst, PathBuf::from("/tmp/data.img"));
+        assert_eq!(plan.block_size, copy::DEFAULT_BLOCK_SIZE);
     }
 
     #[test]
@@ -681,11 +661,12 @@ snap2|data|/dev/vg0/snap2|Swi-a-r---
                 target: BackupTarget::ImageFile(PathBuf::from("/tmp/snap.img")),
                 snapshot_policy: SnapshotPolicy::disabled(),
                 parent_snapshot: None,
+                block_size: None,
             })
             .unwrap();
 
         assert!(plan.temporary_snapshot.is_none());
-        assert_eq!(plan.copy_command.args[0], "if=/dev/vg0/snap1");
+        assert_eq!(plan.copy_src, PathBuf::from("/dev/vg0/snap1"));
     }
 
     #[test]
@@ -697,6 +678,7 @@ snap2|data|/dev/vg0/snap2|Swi-a-r---
                 destination: VolumeRef::new("/dev/vg0/restore"),
                 force: false,
                 base_snapshot: None,
+                block_size: None,
             })
             .unwrap_err();
 
@@ -704,7 +686,7 @@ snap2|data|/dev/vg0/snap2|Swi-a-r---
     }
 
     #[test]
-    fn restore_plan_uses_dd_to_write_image_into_lv() {
+    fn restore_plan_uses_copy_blocks_to_write_image_into_lv() {
         let backend = LvmBackend::new();
         let plan = backend
             .plan_restore(&RestorePlan {
@@ -712,20 +694,13 @@ snap2|data|/dev/vg0/snap2|Swi-a-r---
                 destination: VolumeRef::new("/dev/vg0/restore"),
                 force: true,
                 base_snapshot: None,
+                block_size: None,
             })
             .unwrap();
 
         assert_eq!(plan.destination.lv_path, PathBuf::from("/dev/vg0/restore"));
-        assert_eq!(
-            plan.copy_command.args,
-            vec![
-                "if=/tmp/data.img",
-                "of=/dev/vg0/restore",
-                "bs=4M",
-                "iflag=fullblock",
-                "conv=fsync",
-                "status=none",
-            ]
-        );
+        assert_eq!(plan.copy_src, PathBuf::from("/tmp/data.img"));
+        assert_eq!(plan.copy_dst, PathBuf::from("/dev/vg0/restore"));
+        assert_eq!(plan.block_size, copy::DEFAULT_BLOCK_SIZE);
     }
 }

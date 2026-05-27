@@ -646,6 +646,7 @@ ID 259 gen 302 top level 5 path /mnt/data/.vb-snapshots/snap-2
                     true,
                 ),
                 parent_snapshot: None,
+                block_size: None,
             })
             .unwrap();
 
@@ -681,6 +682,7 @@ ID 259 gen 302 top level 5 path /mnt/data/.vb-snapshots/snap-2
                     SnapshotRef::new(parent.display().to_string())
                         .with_origin(VolumeRef::new(source.display().to_string())),
                 ),
+                block_size: None,
             })
             .unwrap();
 
@@ -715,6 +717,7 @@ ID 259 gen 302 top level 5 path /mnt/data/.vb-snapshots/snap-2
                 destination: VolumeRef::new(destination.display().to_string()),
                 force: false,
                 base_snapshot: None,
+                block_size: None,
             })
             .unwrap();
 

@@ -690,6 +690,7 @@ mod tests {
                 target: crate::types::BackupTarget::ImageFile(PathBuf::from("/tmp/out.zfs")),
                 snapshot_policy: SnapshotPolicy::disabled(),
                 parent_snapshot: None,
+                block_size: None,
             })
             .unwrap();
 
@@ -706,6 +707,7 @@ mod tests {
                 target: crate::types::BackupTarget::ImageFile(PathBuf::from("/tmp/out.zfs")),
                 snapshot_policy: SnapshotPolicy::disabled(),
                 parent_snapshot: None,
+                block_size: None,
             })
             .unwrap_err();
 
@@ -725,6 +727,7 @@ mod tests {
                 parent_snapshot: Some(
                     SnapshotRef::new("tank/data@snap1").with_origin(VolumeRef::new("tank/data")),
                 ),
+                block_size: None,
             })
             .unwrap();
 
@@ -754,6 +757,7 @@ mod tests {
                 destination: VolumeRef::new("tank/restore"),
                 force: true,
                 base_snapshot: None,
+                block_size: None,
             })
             .unwrap();
 
@@ -779,6 +783,7 @@ mod tests {
                 destination: VolumeRef::new("/tank/restore"),
                 force: false,
                 base_snapshot: None,
+                block_size: None,
             })
             .unwrap_err();
 

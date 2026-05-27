@@ -88,6 +88,36 @@ fn missing(flag: &str) -> vpt_rs::Error {
     }
 }
 
+fn parse_block_size(value: &str) -> vpt_rs::Result<usize> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(vpt_rs::Error::InvalidArgument {
+            message: "block size must not be empty".to_string(),
+        });
+    }
+
+    let last = value.as_bytes()[value.len() - 1];
+    let (num_str, multiplier) = match last {
+        b'K' | b'k' => (&value[..value.len() - 1], 1024usize),
+        b'M' | b'm' => (&value[..value.len() - 1], 1024 * 1024),
+        b'G' | b'g' => (&value[..value.len() - 1], 1024 * 1024 * 1024),
+        _ => (value, 1),
+    };
+
+    let num: usize = num_str.parse().map_err(|_| vpt_rs::Error::InvalidArgument {
+        message: format!("invalid block size `{value}`; expected a number with optional K/M/G suffix"),
+    })?;
+
+    let size = num * multiplier;
+    if size == 0 {
+        return Err(vpt_rs::Error::InvalidArgument {
+            message: "block size must be greater than zero".to_string(),
+        });
+    }
+
+    Ok(size)
+}
+
 // ---------------------------------------------------------------------------
 // vptcli snapshot
 // ---------------------------------------------------------------------------
@@ -360,6 +390,7 @@ struct BackupRequest {
     output: PathBuf,
     snapshot_policy: SnapshotPolicy,
     parent_snapshot: Option<SnapshotRef>,
+    block_size: Option<usize>,
 }
 
 fn run_backup(args: Vec<String>) -> vpt_rs::Result<()> {
@@ -375,6 +406,7 @@ fn run_backup(args: Vec<String>) -> vpt_rs::Result<()> {
         target: BackupTarget::ImageFile(request.output.clone()),
         snapshot_policy: request.snapshot_policy,
         parent_snapshot: request.parent_snapshot,
+        block_size: request.block_size,
     })?;
 
     println!("backend: {}", backend.backend_name());
@@ -392,6 +424,7 @@ fn parse_backup_request(args: Vec<String>) -> vpt_rs::Result<BackupRequest> {
     let mut snapshot_read_only = true;
     let mut snapshot_enabled = true;
     let mut parent_snapshot = None;
+    let mut block_size = None;
 
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
@@ -423,6 +456,10 @@ fn parse_backup_request(args: Vec<String>) -> vpt_rs::Result<BackupRequest> {
             }
             "--snapshot-read-write" => {
                 snapshot_read_only = false;
+            }
+            "--block-size" => {
+                let value = iter.next().ok_or_else(|| missing("--block-size"))?;
+                block_size = Some(parse_block_size(&value)?);
             }
             "--no-snapshot" => {
                 snapshot_enabled = false;
@@ -465,12 +502,13 @@ fn parse_backup_request(args: Vec<String>) -> vpt_rs::Result<BackupRequest> {
             SnapshotPolicy::disabled()
         },
         parent_snapshot,
+        block_size,
     })
 }
 
 fn print_backup_usage() {
     println!(
-        "vptcli backup <source> --output <stream-file> [--provider <name>] [--snapshot-source] [--parent-snapshot <id>] [--snapshot-kind crash|application] [--snapshot-label <name>] [--snapshot-read-write] [--no-snapshot]"
+        "vptcli backup <source> --output <stream-file> [--provider <name>] [--snapshot-source] [--parent-snapshot <id>] [--snapshot-kind crash|application] [--snapshot-label <name>] [--snapshot-read-write] [--no-snapshot] [--block-size <N[K|M|G]>]"
     );
 }
 
@@ -484,6 +522,7 @@ struct RestoreRequest {
     destination: VolumeRef,
     force: bool,
     base_snapshot: Option<SnapshotRef>,
+    block_size: Option<usize>,
 }
 
 fn run_restore(args: Vec<String>) -> vpt_rs::Result<()> {
@@ -499,6 +538,7 @@ fn run_restore(args: Vec<String>) -> vpt_rs::Result<()> {
         destination: request.destination,
         force: request.force,
         base_snapshot: request.base_snapshot,
+        block_size: request.block_size,
     })?;
 
     println!("backend: {}", backend.backend_name());
@@ -512,6 +552,7 @@ fn parse_restore_request(args: Vec<String>) -> vpt_rs::Result<RestoreRequest> {
     let mut destination = None;
     let mut force = false;
     let mut base_snapshot = None;
+    let mut block_size = None;
 
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
@@ -531,6 +572,10 @@ fn parse_restore_request(args: Vec<String>) -> vpt_rs::Result<RestoreRequest> {
                 base_snapshot = Some(SnapshotRef::new(
                     iter.next().ok_or_else(|| missing("--base-snapshot"))?,
                 ));
+            }
+            "--block-size" => {
+                let value = iter.next().ok_or_else(|| missing("--block-size"))?;
+                block_size = Some(parse_block_size(&value)?);
             }
             "--help" | "-h" | "help" => {
                 print_restore_usage();
@@ -560,11 +605,12 @@ fn parse_restore_request(args: Vec<String>) -> vpt_rs::Result<RestoreRequest> {
         destination,
         force,
         base_snapshot,
+        block_size,
     })
 }
 
 fn print_restore_usage() {
     println!(
-        "vptcli restore <destination-dir> --input <stream-file> [--provider <name>] [--force] [--base-snapshot <id>]"
+        "vptcli restore <destination-dir> --input <stream-file> [--provider <name>] [--force] [--base-snapshot <id>] [--block-size <N[K|M|G]>]"
     );
 }

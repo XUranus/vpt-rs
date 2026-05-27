@@ -11,6 +11,7 @@
 //! overloading plain strings.
 
 pub mod backup;
+pub mod copy;
 pub mod error;
 pub mod logging;
 pub mod mount;

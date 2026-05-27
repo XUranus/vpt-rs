@@ -217,24 +217,32 @@ impl SnapshotPolicy {
 ///
 /// `parent_snapshot` is used by incremental-capable providers such as Btrfs and ZFS
 /// when planning send-style backups.
+///
+/// `block_size` controls the I/O chunk size for block-level copy operations (e.g. LVM dd).
+/// `None` uses the provider default (4 MiB).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupPlan {
     pub source: BackupSource,
     pub target: BackupTarget,
     pub snapshot_policy: SnapshotPolicy,
     pub parent_snapshot: Option<SnapshotRef>,
+    pub block_size: Option<usize>,
 }
 
 /// Provider-neutral restore/import plan.
 ///
 /// `base_snapshot` is reserved for providers that need an explicit base reference during
 /// incremental restore workflows.
+///
+/// `block_size` controls the I/O chunk size for block-level copy operations (e.g. LVM dd).
+/// `None` uses the provider default (4 MiB).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestorePlan {
     pub source: BackupTarget,
     pub destination: VolumeRef,
     pub force: bool,
     pub base_snapshot: Option<SnapshotRef>,
+    pub block_size: Option<usize>,
 }
 
 /// Mount mode for snapshot browsing or copy-mount flows.
