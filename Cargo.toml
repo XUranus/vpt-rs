@@ -5,12 +5,18 @@ edition = "2024"
 
 [features]
 default = []
-windows-vss = []
+windows-vss = [
+    "dep:windows",
+    "windows/Win32_Foundation",
+    "windows/Win32_Security",
+    "windows/Win32_System_Com",
+]
 
 [dependencies]
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+windows = { version = "0.62", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

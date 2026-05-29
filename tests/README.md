@@ -1,7 +1,7 @@
 # vpt-rs Integration Tests
 
 Python-based integration tests that exercise `vptcli` CLI tool against real
-Linux storage providers using loop devices.
+storage providers. Linux tests use loop devices; Windows tests use VHD files.
 
 ## Structure
 
@@ -11,6 +11,7 @@ tests/
 ├── test_btrfs.py       # Btrfs snapshot → backup → restore → verify roundtrip
 ├── test_lvm.py         # LVM snapshot → backup → restore → verify roundtrip
 ├── test_zfs.py         # ZFS snapshot → backup → restore → verify roundtrip
+├── test_vss.py         # Windows VSS snapshot → backup → restore → verify roundtrip
 ├── test_smoke.py       # CLI smoke tests (no root, cross-platform)
 ├── run_all.py          # Runner for all tests with per-test timeout
 └── README.md           # This file
@@ -57,11 +58,26 @@ On kernels without built-in ZFS support (e.g. ARM/Rockchip boards), the ZFS
 tests will fail even with the package installed. Btrfs and LVM tests are not
 affected.
 
-### 3. Root privileges
+### 3. Root / Administrator privileges
 
 Provider tests (btrfs, lvm, zfs) require root to create loop devices, mount
-filesystems, and manage LVM/ZFS pools. Run with `sudo`. Smoke tests do not
-require root.
+filesystems, and manage LVM/ZFS pools. Run with `sudo`.
+
+The Windows VSS test requires Administrator privileges (elevated PowerShell
+or cmd). It automatically checks for elevation and exits with a clear message
+if not running as admin.
+
+Smoke tests do not require root or admin.
+
+### 4. Windows prerequisites
+
+The VSS test (`test_vss.py`) requires:
+- Windows 10+ (diskpart for VHD management, no Hyper-V module needed)
+- VSS service running (the test starts it automatically if stopped)
+- vptcli built with: `cargo build --release --features windows-vss`
+
+No additional packages are needed — `diskpart`, `vssadmin`, and `wmic` are
+built into Windows.
 
 ## Running tests
 
@@ -77,6 +93,22 @@ sudo python3 tests/run_all.py
 sudo python3 tests/test_btrfs.py
 sudo python3 tests/test_lvm.py
 sudo python3 tests/test_zfs.py
+```
+
+### Windows VSS test (from elevated PowerShell)
+
+```powershell
+# Build first
+cargo build --release --features windows-vss
+
+# Run test
+python tests\test_vss.py
+
+# Keep VHD files and logs after test
+python tests\test_vss.py --keep
+
+# Custom data directory
+python tests\test_vss.py --data-root D:\vpt-debug --keep
 ```
 
 ### Smoke tests only (no root needed)
@@ -104,15 +136,16 @@ All settings are controlled via environment variables or CLI flags.
 
 ### Environment variables
 
-| Variable             | Default                 | Description                                |
-|----------------------|-------------------------|--------------------------------------------|
-| `TEST_DATA_ROOT`     | `/tmp/testvolumedata`   | Root directory for images, streams, logs   |
-| `TEST_MOUNT_ROOT`    | `/tmp/testvolumemnt`    | Root directory for mount points            |
-| `TEST_ID`            | *(auto-generated UUID)* | Test run identifier for artifact isolation |
-| `TEST_CLEANUP`       | `1`                     | `1` to remove mount dirs after test        |
-| `TEST_KEEP_ARTIFACTS`| `0`                     | `1` to keep image/stream files after test  |
-| `VPT_PROJECT_ROOT`   | *(auto-detected)*       | Path to project root (contains Cargo.toml) |
-| `RUST_LOG`           | `vpt_rs=debug`          | Log level for CLI tools (tracing)          |
+| Variable             | Default                       | Description                                |
+|----------------------|-------------------------------|--------------------------------------------|
+| `TEST_DATA_ROOT`     | `/tmp/testvolumedata` (Linux) | Root directory for images, streams, logs   |
+|                      | `C:\temp\vpt-test` (Windows)  |                                            |
+| `TEST_MOUNT_ROOT`    | `/tmp/testvolumemnt`          | Root directory for mount points (Linux)    |
+| `TEST_ID`            | *(auto-generated UUID)*       | Test run identifier for artifact isolation |
+| `TEST_CLEANUP`       | `1`                           | `1` to remove mount dirs after test        |
+| `TEST_KEEP_ARTIFACTS`| `0`                           | `1` to keep image/VHD/stream files after test |
+| `VPT_PROJECT_ROOT`   | *(auto-detected)*             | Path to project root (contains Cargo.toml) |
+| `RUST_LOG`           | `vpt_rs=debug`                | Log level for CLI tools (tracing)          |
 
 ### Runner CLI flags
 
@@ -126,11 +159,19 @@ All settings are controlled via environment variables or CLI flags.
 | `--build`          | —                        | Run `cargo build --release` first    |
 | `--timeout N`      | —                        | Per-test timeout in seconds (def: 180)|
 
+`test_vss.py` also accepts these flags when run directly:
+
+| Flag                 | Environment equivalent   | Description                          |
+|----------------------|--------------------------|--------------------------------------|
+| `--keep`             | `TEST_KEEP_ARTIFACTS=1`  | Keep VHD files, backup image, logs   |
+| `--data-root PATH`   | `TEST_DATA_ROOT`         | Override VHD/log output directory    |
+
 ## Test isolation
 
 Each test run is identified by a UUID. All artifacts are stored under
-`<TEST_DATA_ROOT>/<uuid>/` and `<TEST_MOUNT_ROOT>/<uuid>/`:
+`<TEST_DATA_ROOT>/<uuid>/` (Linux) or `<TEST_DATA_ROOT>/<uuid>\` (Windows):
 
+Linux:
 ```
 /tmp/testvolumedata/ab12cd34/
 ├── logs/
@@ -144,13 +185,17 @@ Each test run is identified by a UUID. All artifacts are stored under
 ├── lvm-stream.img         # dd block-level backup
 ├── zfs.img                # Loop device image for zpool
 └── zfs.stream             # zfs send backup stream
+```
 
-/tmp/testvolumemnt/ab12cd34/
-├── btrfs/                 # btrfs mount point (subvolumes live here)
-├── lvm-source/            # LVM source LV mount
-├── lvm-restore/           # LVM restored LV mount
-├── zfs-data/              # ZFS source dataset mount
-└── zfs-restore/           # ZFS restored dataset mount
+Windows (VSS):
+```
+C:\temp\vpt-test\ab12cd34\
+├── logs\
+│   ├── vss.log            # Python test log
+│   └── diskpart.log       # All diskpart commands with output
+├── source.vhd             # Source VHD (256 MB fixed)
+├── target.vhd             # Target VHD for restore verification
+└── backup.img             # Block-level volume backup image
 ```
 
 ## Viewing logs
@@ -223,19 +268,31 @@ umount /mnt/tmp
 
 ### Pin a UUID for reproducible debugging
 
+Linux:
 ```bash
 TEST_ID=debug123 TEST_KEEP_ARTIFACTS=1 TEST_CLEANUP=0 \
   sudo python3 tests/test_btrfs.py
 ```
 
+Windows:
+```powershell
+$env:TEST_ID = "debug123"
+python tests\test_vss.py --keep
+```
+
 This creates artifacts at known paths:
 
 ```
+Linux:
 /tmp/testvolumedata/debug123/logs/btrfs.log    # test log
 /tmp/testvolumedata/debug123/logs/cli.log      # CLI tracing
 /tmp/testvolumedata/debug123/btrfs.img         # volume image
-/tmp/testvolumedata/debug123/btrfs.stream      # backup stream
-/tmp/testvolumemnt/debug123/btrfs/             # mount with source + restore
+
+Windows:
+C:\temp\vpt-test\debug123\logs\vss.log         # test log
+C:\temp\vpt-test\debug123\logs\diskpart.log    # diskpart commands
+C:\temp\vpt-test\debug123\source.vhd           # source VHD
+C:\temp\vpt-test\debug123\backup.img           # backup image
 ```
 
 ### Use the runner
@@ -294,27 +351,51 @@ Each provider test follows the same 11-step lifecycle:
 - `vptcli snapshot` / `vptcli backup` / `vptcli restore` with no args — shows usage (exit 0)
 - Invalid provider — returns non-zero exit code
 
+### vss (`test_vss.py`) — Windows only
+
+```powershell
+python tests\test_vss.py [--keep] [--data-root PATH]
+```
+
+- Volume init: `diskpart create vdisk` → `attach vdisk` → `create partition primary` → `format fs=ntfs`
+- Write data: 3 files via Python `Path.write_text()`: hello.txt, data.txt, sub/nested.txt
+- Snapshot create: `vptcli snapshot create --provider windows-vss` (COM API → wmic fallback)
+- Snapshot list: `vptcli snapshot list --provider windows-vss`
+- Backup: `vptcli backup --provider windows-vss` (COM snapshot → direct volume copy fallback)
+- Restore: detach target VHD, raw block copy of backup.img into target VHD file, re-mount
+- Verify: `Path.read_text()` on all 3 files in restored volume, assert content matches
+- Snapshot delete: `vptcli snapshot delete --provider windows-vss` (COM → vssadmin fallback)
+- Teardown: `diskpart detach vdisk` → delete VHD files (unless `--keep`)
+
+**Notes:**
+- VSS snapshot operations use COM API (`IVssBackupComponents`) with automatic fallback
+  to `wmic`/`vssadmin` CLI commands when COM is unavailable
+- VHD volumes on desktop Windows (Home/Pro) don't support VSS snapshots natively;
+  the backup falls back to direct block-level volume copy
+- The `--keep` flag preserves all VHD files, backup image, and logs for debugging
+
 ## Coverage matrix
 
-| Step               | btrfs | lvm | zfs | smoke |
-|--------------------|:-----:|:---:|:---:|:-----:|
-| Volume init        |   ✓   |  ✓  |  ✓  |       |
-| Mount              |   ✓   |  ✓  |  ✓  |       |
-| Write data         |   ✓   |  ✓  |  ✓  |       |
-| Snapshot create    |   ✓   |  ✓  |  ✓  |       |
-| Snapshot list      |   ✓   |  ✓  |  ✓  |       |
-| Backup             |   ✓   |  ✓  |  ✓  |       |
-| Restore            |   ✓   |  ✓  |  ✓  |       |
-| Mount restored     |   ✓   |  ✓  |  ✓  |       |
-| Verify files       |   ✓   |  ✓  |  ✓  |       |
-| Snapshot delete    |   ✓   |  ✓  |  ✓  |       |
-| Teardown/cleanup   |   ✓   |  ✓  |  ✓  |       |
-| CLI usage output   |       |     |     |   ✓   |
-| Backend list       |       |     |     |   ✓   |
-| Capabilities query |       |     |     |   ✓   |
-| Invalid provider   |       |     |     |   ✓   |
+| Step               | btrfs | lvm | zfs | vss | smoke |
+|--------------------|:-----:|:---:|:---:|:---:|:-----:|
+| Volume init        |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Mount              |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Write data         |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Snapshot create    |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Snapshot list      |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Backup             |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Restore            |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Mount restored     |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Verify files       |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Snapshot delete    |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| Teardown/cleanup   |   ✓   |  ✓  |  ✓  |  ✓  |       |
+| CLI usage output   |       |     |     |     |   ✓   |
+| Backend list       |       |     |     |     |   ✓   |
+| Capabilities query |       |     |     |     |   ✓   |
+| Invalid provider   |       |     |     |     |   ✓   |
 
 - **btrfs**: loop → `mkfs.btrfs` → subvolume → `btrfs send`/`btrfs receive`
 - **lvm**: loop → `pvcreate` → `vgcreate` → `lvcreate` → `dd` block copy
 - **zfs**: loop → `zpool create` → `zfs create` → `zfs send`/`zfs receive`
+- **vss**: `diskpart create vdisk` → NTFS → VSS snapshot (COM/wmic) → block copy
 - **smoke**: CLI argument validation, no root required

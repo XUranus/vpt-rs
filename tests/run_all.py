@@ -145,6 +145,16 @@ def main():
     providers_needing_sudo = {"btrfs", "lvm", "zfs"}
     selected_provider_tests = [p for p in providers if p in providers_needing_sudo]
 
+    # VSS requires admin on Windows
+    if "vss" in providers:
+        import platform
+        if platform.system() == "Windows":
+            try:
+                from test_vss import check_admin_privileges
+                check_admin_privileges()
+            except ImportError:
+                pass
+
     if selected_provider_tests:
         require_root()
         # Collect all required commands
@@ -186,6 +196,13 @@ def main():
         from test_smoke import run_all as smoke_run_all
 
         test_modules["smoke"] = smoke_run_all
+    if "vss" in providers:
+        try:
+            from test_vss import test_vss_roundtrip
+
+            test_modules["vss"] = test_vss_roundtrip
+        except ImportError:
+            pass  # not on Windows or Hyper-V not available
 
     # -- run tests --
     env = TestEnv()

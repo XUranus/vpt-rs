@@ -1,10 +1,9 @@
 use crate::error::{Error, Result};
 use crate::types::{SnapshotHandle, SnapshotInfo, VolumeRef};
 
-use super::session::VssSession;
 use super::{BACKEND_NAME, VssSnapshotSpec, VssTimeouts, ffi};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct VssRequestor {
     timeouts: VssTimeouts,
 }
@@ -15,9 +14,9 @@ impl VssRequestor {
         Ok(Self { timeouts })
     }
 
-    pub fn start_session(&self, spec: VssSnapshotSpec) -> Result<VssSession> {
+    pub fn start_session(&self, spec: VssSnapshotSpec) -> Result<super::session::VssSession> {
         let raw = ffi::create_snapshot_set(&spec, self.timeouts)?;
-        Ok(VssSession::new(spec, self.timeouts, raw))
+        Ok(super::session::VssSession::new(spec, self.timeouts, raw))
     }
 
     pub fn delete_snapshot(&self, snapshot: &SnapshotHandle) -> Result<()> {
@@ -37,7 +36,6 @@ impl VssRequestor {
             });
         }
 
-        let _ = self.timeouts;
         ffi::list_snapshots(source, BACKEND_NAME)
     }
 }

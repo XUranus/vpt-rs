@@ -3,7 +3,7 @@ use crate::types::{SnapshotHandle, SnapshotInfo};
 
 use super::{BACKEND_NAME, SnapshotContext, VssSnapshotSpec, VssTimeouts, ffi};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct VssSession {
     spec: VssSnapshotSpec,
     timeouts: VssTimeouts,
@@ -31,21 +31,27 @@ impl VssSession {
         self.spec.context
     }
 
-    pub fn create_snapshot(self) -> Result<SnapshotInfo> {
-        ffi::commit_snapshot_set(&self.raw, self.timeouts)?;
+    pub fn create_snapshot(mut self) -> Result<SnapshotInfo> {
+        ffi::commit_snapshot_set(&mut self.raw, self.timeouts)?;
+
+        let path_hint = if !self.raw.device_path.is_empty() {
+            Some(std::path::PathBuf::from(&self.raw.device_path))
+        } else {
+            None
+        };
 
         Ok(SnapshotInfo {
             handle: SnapshotHandle {
-                id: self.raw.snapshot_id,
+                id: self.raw.snapshot_id.clone(),
                 source: self.spec.request.source,
             },
             backend: BACKEND_NAME,
-            path_hint: None,
+            path_hint,
             read_only: self.spec.request.read_only,
         })
     }
 
-    pub fn abort(self) -> Result<()> {
-        ffi::abort_snapshot_set(&self.raw)
+    pub fn abort(mut self) -> Result<()> {
+        ffi::abort_snapshot_set(&mut self.raw)
     }
 }

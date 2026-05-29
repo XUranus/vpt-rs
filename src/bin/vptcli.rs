@@ -72,6 +72,11 @@ fn resolve_backend(provider: Option<&str>) -> vpt_rs::Result<platform::CurrentBa
     #[allow(unreachable_code)]
     {
         if let Some(name) = provider {
+            // On non-Linux platforms, accept the platform's native backend name
+            let backend = platform::current_backend();
+            if name == backend.backend_name() {
+                return Ok(backend);
+            }
             return Err(vpt_rs::Error::InvalidArgument {
                 message: format!(
                     "provider selection is not supported on this platform: `{name}`"

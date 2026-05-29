@@ -23,7 +23,7 @@ pub use macos::MacOsBackend as CurrentBackend;
 pub use unix::UnixBackend as CurrentBackend;
 #[cfg(target_os = "windows")]
 pub use windows::WindowsBackend as CurrentBackend;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "windows-vss"))]
 pub use windows::vss::VssSnapshotProvider;
 
 use crate::backup::BlockDeviceCopier;
