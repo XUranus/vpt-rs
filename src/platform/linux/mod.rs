@@ -2,7 +2,8 @@ mod btrfs;
 mod lvm;
 mod zfs;
 
-use crate::backup::BlockDeviceCopier;
+use crate::backend::Backend;
+use crate::backup::BackupExecutor;
 use crate::error::{Error, Result};
 use crate::mount::MountManager;
 use crate::platform::BackendDescriptor;
@@ -18,6 +19,17 @@ pub use lvm::LvmBackend;
 pub use zfs::ZfsBackend;
 
 pub const DEFAULT_PROVIDER: &str = "btrfs";
+
+/// Helper macro: delegate a trait method call to the inner backend variant.
+macro_rules! delegate {
+    ($self:expr, $method:ident $(, $arg:expr)*) => {
+        match $self {
+            Self::Btrfs(inner) => inner.$method($($arg),*),
+            Self::Lvm(inner) => inner.$method($($arg),*),
+            Self::Zfs(inner) => inner.$method($($arg),*),
+        }
+    };
+}
 
 #[derive(Debug, Clone)]
 pub enum LinuxBackend {
@@ -46,14 +58,6 @@ impl LinuxBackend {
         ]
     }
 
-    pub fn backend_name(&self) -> &'static str {
-        match self {
-            Self::Btrfs(backend) => backend.backend_name(),
-            Self::Lvm(backend) => backend.backend_name(),
-            Self::Zfs(backend) => backend.backend_name(),
-        }
-    }
-
     pub fn provider_name(&self) -> &'static str {
         match self {
             Self::Btrfs(_) => "btrfs",
@@ -67,7 +71,7 @@ impl LinuxBackend {
             platform: std::env::consts::OS,
             provider_name: Some(self.provider_name()),
             backend_name: self.backend_name(),
-            capabilities: SnapshotProvider::capabilities(self),
+            capabilities: self.capabilities(),
         }
     }
 }
@@ -78,103 +82,49 @@ impl Default for LinuxBackend {
     }
 }
 
-impl SnapshotProvider for LinuxBackend {
+impl Backend for LinuxBackend {
     fn backend_name(&self) -> &'static str {
-        self.backend_name()
+        delegate!(self, backend_name)
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        match self {
-            Self::Btrfs(backend) => SnapshotProvider::capabilities(backend),
-            Self::Lvm(backend) => SnapshotProvider::capabilities(backend),
-            Self::Zfs(backend) => SnapshotProvider::capabilities(backend),
-        }
-    }
-
-    fn create_snapshot(&self, request: &SnapshotRequest) -> Result<SnapshotInfo> {
-        match self {
-            Self::Btrfs(backend) => backend.create_snapshot(request),
-            Self::Lvm(backend) => backend.create_snapshot(request),
-            Self::Zfs(backend) => backend.create_snapshot(request),
-        }
-    }
-
-    fn delete_snapshot(&self, snapshot: &SnapshotHandle) -> Result<()> {
-        match self {
-            Self::Btrfs(backend) => backend.delete_snapshot(snapshot),
-            Self::Lvm(backend) => backend.delete_snapshot(snapshot),
-            Self::Zfs(backend) => backend.delete_snapshot(snapshot),
-        }
-    }
-
-    fn list_snapshots(&self, source: &VolumeRef) -> Result<Vec<SnapshotInfo>> {
-        match self {
-            Self::Btrfs(backend) => backend.list_snapshots(source),
-            Self::Lvm(backend) => backend.list_snapshots(source),
-            Self::Zfs(backend) => backend.list_snapshots(source),
-        }
+        delegate!(self, capabilities)
     }
 }
 
-impl BlockDeviceCopier for LinuxBackend {
-    fn backend_name(&self) -> &'static str {
-        self.backend_name()
+impl SnapshotProvider for LinuxBackend {
+    fn create_snapshot(&self, request: &SnapshotRequest) -> Result<SnapshotInfo> {
+        delegate!(self, create_snapshot, request)
     }
 
-    fn capabilities(&self) -> &'static [Capability] {
-        SnapshotProvider::capabilities(self)
+    fn delete_snapshot(&self, snapshot: &SnapshotHandle) -> Result<()> {
+        delegate!(self, delete_snapshot, snapshot)
     }
 
+    fn list_snapshots(&self, source: &VolumeRef) -> Result<Vec<SnapshotInfo>> {
+        delegate!(self, list_snapshots, source)
+    }
+}
+
+impl BackupExecutor for LinuxBackend {
     fn backup_volume(&self, plan: &BackupPlan) -> Result<()> {
-        match self {
-            Self::Btrfs(backend) => backend.backup_volume(plan),
-            Self::Lvm(backend) => backend.backup_volume(plan),
-            Self::Zfs(backend) => backend.backup_volume(plan),
-        }
+        delegate!(self, backup_volume, plan)
     }
 }
 
 impl RestorePlanner for LinuxBackend {
-    fn backend_name(&self) -> &'static str {
-        self.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        SnapshotProvider::capabilities(self)
-    }
-
     fn restore_volume(&self, plan: &RestorePlan) -> Result<()> {
-        match self {
-            Self::Btrfs(backend) => backend.restore_volume(plan),
-            Self::Lvm(backend) => backend.restore_volume(plan),
-            Self::Zfs(backend) => backend.restore_volume(plan),
-        }
+        delegate!(self, restore_volume, plan)
     }
 }
 
 impl MountManager for LinuxBackend {
-    fn backend_name(&self) -> &'static str {
-        self.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        SnapshotProvider::capabilities(self)
-    }
-
     fn mount_snapshot(&self, request: &MountRequest) -> Result<MountHandle> {
-        match self {
-            Self::Btrfs(backend) => backend.mount_snapshot(request),
-            Self::Lvm(backend) => backend.mount_snapshot(request),
-            Self::Zfs(backend) => backend.mount_snapshot(request),
-        }
+        delegate!(self, mount_snapshot, request)
     }
 
     fn unmount(&self, handle: &MountHandle) -> Result<()> {
-        match self {
-            Self::Btrfs(backend) => backend.unmount(handle),
-            Self::Lvm(backend) => backend.unmount(handle),
-            Self::Zfs(backend) => backend.unmount(handle),
-        }
+        delegate!(self, unmount, handle)
     }
 }
 

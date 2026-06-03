@@ -1,8 +1,7 @@
+use crate::backend::Backend;
 use crate::error::Result;
-use crate::types::{BackupPlan, Capability};
+use crate::types::BackupPlan;
 
-pub trait BlockDeviceCopier: Send + Sync {
-    fn backend_name(&self) -> &'static str;
-    fn capabilities(&self) -> &'static [Capability];
+pub trait BackupExecutor: Backend {
     fn backup_volume(&self, plan: &BackupPlan) -> Result<()>;
 }

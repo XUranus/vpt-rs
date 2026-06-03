@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, info};
 
-use crate::backup::BlockDeviceCopier;
+use crate::backend::Backend;
+use crate::backup::BackupExecutor;
 use crate::error::{Error, Result};
 use crate::mount::MountManager;
 use crate::platform::StubBackend;
@@ -69,10 +70,6 @@ pub struct BtrfsReceivePlan {
 impl BtrfsBackend {
     pub fn new() -> Self {
         Self(StubBackend::new("linux-btrfs", CAPABILITIES))
-    }
-
-    pub fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
     }
 
     pub fn plan_create_snapshot(&self, request: &SnapshotRequest) -> Result<BtrfsSnapshotPlan> {
@@ -388,7 +385,7 @@ impl BtrfsBackend {
     }
 }
 
-impl SnapshotProvider for BtrfsBackend {
+impl Backend for BtrfsBackend {
     fn backend_name(&self) -> &'static str {
         self.0.backend_name()
     }
@@ -396,7 +393,9 @@ impl SnapshotProvider for BtrfsBackend {
     fn capabilities(&self) -> &'static [Capability] {
         self.0.capabilities()
     }
+}
 
+impl SnapshotProvider for BtrfsBackend {
     fn create_snapshot(&self, request: &SnapshotRequest) -> Result<SnapshotInfo> {
         info!(backend = self.backend_name(), source = %request.source, read_only = request.read_only, "create_snapshot called");
         let result = (|| {
@@ -449,15 +448,7 @@ impl SnapshotProvider for BtrfsBackend {
     }
 }
 
-impl BlockDeviceCopier for BtrfsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
+impl BackupExecutor for BtrfsBackend {
     fn backup_volume(&self, plan: &BackupPlan) -> Result<()> {
         info!(backend = self.backend_name(), source = %plan.source, "backup_volume called");
         let result = (|| {
@@ -472,14 +463,6 @@ impl BlockDeviceCopier for BtrfsBackend {
 }
 
 impl RestorePlanner for BtrfsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn restore_volume(&self, plan: &RestorePlan) -> Result<()> {
         info!(backend = self.backend_name(), destination = %plan.destination, "restore_volume called");
         let result = (|| {
@@ -494,14 +477,6 @@ impl RestorePlanner for BtrfsBackend {
 }
 
 impl MountManager for BtrfsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn mount_snapshot(&self, _request: &MountRequest) -> Result<MountHandle> {
         let error = Error::UnsupportedOperation {
             operation: "mount_snapshot",

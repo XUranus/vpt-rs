@@ -10,6 +10,7 @@
 //! providers like Btrfs and ZFS can support file-based send/receive workflows without
 //! overloading plain strings.
 
+pub mod backend;
 pub mod backup;
 pub mod copy;
 pub mod error;
@@ -21,7 +22,8 @@ pub mod restore;
 pub mod snapshot;
 pub mod types;
 
-pub use backup::BlockDeviceCopier;
+pub use backend::Backend;
+pub use backup::BackupExecutor;
 pub use error::{Error, Result};
 pub use mount::MountManager;
 pub use platform::BackendDescriptor;

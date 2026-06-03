@@ -1,4 +1,5 @@
 use super::StubBackend;
+use crate::backend::Backend;
 use crate::types::Capability;
 
 const CAPABILITIES: &[Capability] = &[
@@ -15,10 +16,6 @@ impl UnixBackend {
     pub fn new() -> Self {
         Self(StubBackend::new("unix-generic", CAPABILITIES))
     }
-
-    pub fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
 }
 
 impl Default for UnixBackend {
@@ -27,7 +24,7 @@ impl Default for UnixBackend {
     }
 }
 
-impl crate::snapshot::SnapshotProvider for UnixBackend {
+impl Backend for UnixBackend {
     fn backend_name(&self) -> &'static str {
         self.0.backend_name()
     }
@@ -35,7 +32,9 @@ impl crate::snapshot::SnapshotProvider for UnixBackend {
     fn capabilities(&self) -> &'static [Capability] {
         self.0.capabilities()
     }
+}
 
+impl crate::snapshot::SnapshotProvider for UnixBackend {
     fn create_snapshot(
         &self,
         request: &crate::types::SnapshotRequest,
@@ -55,43 +54,19 @@ impl crate::snapshot::SnapshotProvider for UnixBackend {
     }
 }
 
-impl crate::backup::BlockDeviceCopier for UnixBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
+impl crate::backup::BackupExecutor for UnixBackend {
     fn backup_volume(&self, plan: &crate::types::BackupPlan) -> crate::error::Result<()> {
         self.0.backup_volume(plan)
     }
 }
 
 impl crate::restore::RestorePlanner for UnixBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn restore_volume(&self, plan: &crate::types::RestorePlan) -> crate::error::Result<()> {
         self.0.restore_volume(plan)
     }
 }
 
 impl crate::mount::MountManager for UnixBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn mount_snapshot(
         &self,
         request: &crate::types::MountRequest,

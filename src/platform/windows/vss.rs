@@ -2,6 +2,7 @@ pub mod ffi;
 pub mod requestor;
 pub mod session;
 
+use crate::backend::Backend;
 use crate::error::{Error, Result};
 use crate::snapshot::SnapshotProvider;
 use crate::types::{
@@ -175,7 +176,7 @@ impl Default for VssSnapshotProvider {
     }
 }
 
-impl SnapshotProvider for VssSnapshotProvider {
+impl Backend for VssSnapshotProvider {
     fn backend_name(&self) -> &'static str {
         BACKEND_NAME
     }
@@ -189,7 +190,9 @@ impl SnapshotProvider for VssSnapshotProvider {
             Capability::DirectDeviceAccess,
         ]
     }
+}
 
+impl SnapshotProvider for VssSnapshotProvider {
     fn create_snapshot(&self, request: &SnapshotRequest) -> Result<SnapshotInfo> {
         let spec = self.build_spec(request.clone());
         let session = self.start_session(spec)?;

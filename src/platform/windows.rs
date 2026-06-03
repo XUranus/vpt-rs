@@ -2,7 +2,7 @@
 pub mod vss;
 
 use super::StubBackend;
-use crate::snapshot::SnapshotProvider;
+use crate::backend::Backend;
 use crate::types::Capability;
 
 const CAPABILITIES: &[Capability] = &[
@@ -20,10 +20,6 @@ impl WindowsBackend {
     pub fn new() -> Self {
         Self(StubBackend::new("windows-vss", CAPABILITIES))
     }
-
-    pub fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
 }
 
 impl Default for WindowsBackend {
@@ -32,10 +28,7 @@ impl Default for WindowsBackend {
     }
 }
 
-// ── SnapshotProvider ───────────────────────────────────────────────────────
-
-#[cfg(feature = "windows-vss")]
-impl SnapshotProvider for WindowsBackend {
+impl Backend for WindowsBackend {
     fn backend_name(&self) -> &'static str {
         self.0.backend_name()
     }
@@ -43,7 +36,12 @@ impl SnapshotProvider for WindowsBackend {
     fn capabilities(&self) -> &'static [Capability] {
         self.0.capabilities()
     }
+}
 
+// ── SnapshotProvider ───────────────────────────────────────────────────────
+
+#[cfg(feature = "windows-vss")]
+impl crate::snapshot::SnapshotProvider for WindowsBackend {
     fn create_snapshot(
         &self,
         request: &crate::types::SnapshotRequest,
@@ -64,15 +62,7 @@ impl SnapshotProvider for WindowsBackend {
 }
 
 #[cfg(not(feature = "windows-vss"))]
-impl SnapshotProvider for WindowsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
+impl crate::snapshot::SnapshotProvider for WindowsBackend {
     fn create_snapshot(
         &self,
         _request: &crate::types::SnapshotRequest,
@@ -104,18 +94,10 @@ impl SnapshotProvider for WindowsBackend {
     }
 }
 
-// ── BlockDeviceCopier ──────────────────────────────────────────────────────
+// ── BackupExecutor ─────────────────────────────────────────────────────────
 
 #[cfg(feature = "windows-vss")]
-impl crate::backup::BlockDeviceCopier for WindowsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
+impl crate::backup::BackupExecutor for WindowsBackend {
     fn backup_volume(&self, plan: &crate::types::BackupPlan) -> crate::error::Result<()> {
         use tracing::{error, info};
 
@@ -244,15 +226,7 @@ impl crate::backup::BlockDeviceCopier for WindowsBackend {
 }
 
 #[cfg(not(feature = "windows-vss"))]
-impl crate::backup::BlockDeviceCopier for WindowsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
+impl crate::backup::BackupExecutor for WindowsBackend {
     fn backup_volume(&self, _plan: &crate::types::BackupPlan) -> crate::error::Result<()> {
         Err(crate::error::Error::UnsupportedOperation {
             operation: "backup_volume",
@@ -265,14 +239,6 @@ impl crate::backup::BlockDeviceCopier for WindowsBackend {
 
 #[cfg(feature = "windows-vss")]
 impl crate::restore::RestorePlanner for WindowsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn restore_volume(&self, plan: &crate::types::RestorePlan) -> crate::error::Result<()> {
         use tracing::{error, info};
 
@@ -313,14 +279,6 @@ impl crate::restore::RestorePlanner for WindowsBackend {
 
 #[cfg(not(feature = "windows-vss"))]
 impl crate::restore::RestorePlanner for WindowsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn restore_volume(&self, _plan: &crate::types::RestorePlan) -> crate::error::Result<()> {
         Err(crate::error::Error::UnsupportedOperation {
             operation: "restore_volume",
@@ -332,14 +290,6 @@ impl crate::restore::RestorePlanner for WindowsBackend {
 // ── MountManager ───────────────────────────────────────────────────────────
 
 impl crate::mount::MountManager for WindowsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn mount_snapshot(
         &self,
         _request: &crate::types::MountRequest,

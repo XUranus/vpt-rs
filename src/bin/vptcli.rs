@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use tracing::{error, info};
 
-use vpt_rs::backup::BlockDeviceCopier;
+use vpt_rs::Backend;
+use vpt_rs::backup::BackupExecutor;
 use vpt_rs::logging;
 use vpt_rs::platform;
 use vpt_rs::restore::RestorePlanner;
@@ -361,7 +362,7 @@ fn backend_descriptor(backend: &platform::CurrentBackend) -> platform::BackendDe
         platform: platform::current_platform(),
         provider_name: None,
         backend_name: backend.backend_name(),
-        capabilities: vpt_rs::SnapshotProvider::capabilities(backend),
+        capabilities: backend.capabilities(),
     }
 }
 

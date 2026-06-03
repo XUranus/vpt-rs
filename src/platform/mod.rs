@@ -26,7 +26,8 @@ pub use windows::WindowsBackend as CurrentBackend;
 #[cfg(all(target_os = "windows", feature = "windows-vss"))]
 pub use windows::vss::VssSnapshotProvider;
 
-use crate::backup::BlockDeviceCopier;
+use crate::backend::Backend;
+use crate::backup::BackupExecutor;
 use crate::error::{Error, Result};
 use crate::mount::MountManager;
 use crate::restore::RestorePlanner;
@@ -65,7 +66,7 @@ pub fn current_backend_descriptor() -> BackendDescriptor {
         platform: current_platform(),
         provider_name: None,
         backend_name: backend.backend_name(),
-        capabilities: SnapshotProvider::capabilities(&backend),
+        capabilities: backend.capabilities(),
     }
 }
 
@@ -98,14 +99,6 @@ impl StubBackend {
         }
     }
 
-    pub fn backend_name(&self) -> &'static str {
-        self.backend_name
-    }
-
-    pub fn capabilities(&self) -> &'static [Capability] {
-        self.capabilities
-    }
-
     pub fn descriptor(&self) -> BackendDescriptor {
         BackendDescriptor {
             platform: current_platform(),
@@ -116,7 +109,7 @@ impl StubBackend {
     }
 }
 
-impl SnapshotProvider for StubBackend {
+impl Backend for StubBackend {
     fn backend_name(&self) -> &'static str {
         self.backend_name
     }
@@ -124,7 +117,9 @@ impl SnapshotProvider for StubBackend {
     fn capabilities(&self) -> &'static [Capability] {
         self.capabilities
     }
+}
 
+impl SnapshotProvider for StubBackend {
     fn create_snapshot(&self, _request: &SnapshotRequest) -> Result<SnapshotInfo> {
         let error = unsupported("create_snapshot", self.backend_name);
         error!(backend = self.backend_name, error = %error, "create_snapshot failed");
@@ -144,15 +139,7 @@ impl SnapshotProvider for StubBackend {
     }
 }
 
-impl BlockDeviceCopier for StubBackend {
-    fn backend_name(&self) -> &'static str {
-        self.backend_name
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.capabilities
-    }
-
+impl BackupExecutor for StubBackend {
     fn backup_volume(&self, _plan: &BackupPlan) -> Result<()> {
         let error = unsupported("backup_volume", self.backend_name);
         error!(backend = self.backend_name, error = %error, "backup_volume failed");
@@ -161,14 +148,6 @@ impl BlockDeviceCopier for StubBackend {
 }
 
 impl RestorePlanner for StubBackend {
-    fn backend_name(&self) -> &'static str {
-        self.backend_name
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.capabilities
-    }
-
     fn restore_volume(&self, _plan: &RestorePlan) -> Result<()> {
         let error = unsupported("restore_volume", self.backend_name);
         error!(backend = self.backend_name, error = %error, "restore_volume failed");
@@ -177,14 +156,6 @@ impl RestorePlanner for StubBackend {
 }
 
 impl MountManager for StubBackend {
-    fn backend_name(&self) -> &'static str {
-        self.backend_name
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.capabilities
-    }
-
     fn mount_snapshot(&self, _request: &MountRequest) -> Result<MountHandle> {
         let error = unsupported("mount_snapshot", self.backend_name);
         error!(backend = self.backend_name, error = %error, "mount_snapshot failed");

@@ -3,7 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tracing::{error, info};
 
-use crate::backup::BlockDeviceCopier;
+use crate::backend::Backend;
+use crate::backup::BackupExecutor;
 use crate::error::{Error, Result};
 use crate::mount::MountManager;
 use crate::platform::StubBackend;
@@ -85,10 +86,6 @@ impl ZfsCommand {
 impl ZfsBackend {
     pub fn new() -> Self {
         Self(StubBackend::new("linux-zfs", CAPABILITIES))
-    }
-
-    pub fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
     }
 
     pub fn parse_dataset_ref(&self, source: &VolumeRef) -> Result<ZfsDatasetRef> {
@@ -386,7 +383,7 @@ impl ZfsBackend {
     }
 }
 
-impl SnapshotProvider for ZfsBackend {
+impl Backend for ZfsBackend {
     fn backend_name(&self) -> &'static str {
         self.0.backend_name()
     }
@@ -394,7 +391,9 @@ impl SnapshotProvider for ZfsBackend {
     fn capabilities(&self) -> &'static [Capability] {
         self.0.capabilities()
     }
+}
 
+impl SnapshotProvider for ZfsBackend {
     fn create_snapshot(&self, request: &SnapshotRequest) -> Result<SnapshotInfo> {
         info!(backend = self.backend_name(), source = %request.source, read_only = request.read_only, "create_snapshot called");
         let result = (|| {
@@ -444,15 +443,7 @@ impl SnapshotProvider for ZfsBackend {
     }
 }
 
-impl BlockDeviceCopier for ZfsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
+impl BackupExecutor for ZfsBackend {
     fn backup_volume(&self, plan: &BackupPlan) -> Result<()> {
         info!(backend = self.backend_name(), source = %plan.source, "backup_volume called");
         let send_plan = match self.plan_backup(plan) {
@@ -507,14 +498,6 @@ impl BlockDeviceCopier for ZfsBackend {
 }
 
 impl RestorePlanner for ZfsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn restore_volume(&self, plan: &RestorePlan) -> Result<()> {
         info!(backend = self.backend_name(), destination = %plan.destination, "restore_volume called");
         let result = (|| {
@@ -539,14 +522,6 @@ impl RestorePlanner for ZfsBackend {
 }
 
 impl MountManager for ZfsBackend {
-    fn backend_name(&self) -> &'static str {
-        self.0.backend_name()
-    }
-
-    fn capabilities(&self) -> &'static [Capability] {
-        self.0.capabilities()
-    }
-
     fn mount_snapshot(&self, _request: &MountRequest) -> Result<MountHandle> {
         let error = Error::UnsupportedOperation {
             operation: "mount_snapshot",

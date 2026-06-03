@@ -1,8 +1,7 @@
+use crate::backend::Backend;
 use crate::error::Result;
-use crate::types::{Capability, RestorePlan};
+use crate::types::RestorePlan;
 
-pub trait RestorePlanner: Send + Sync {
-    fn backend_name(&self) -> &'static str;
-    fn capabilities(&self) -> &'static [Capability];
+pub trait RestorePlanner: Backend {
     fn restore_volume(&self, plan: &RestorePlan) -> Result<()>;
 }
