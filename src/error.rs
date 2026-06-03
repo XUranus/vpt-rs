@@ -1,6 +1,12 @@
 use std::path::PathBuf;
+
+/// A convenience alias for `std::result::Result<T, Error>`.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Errors returned by volume backup operations.
+///
+/// Each variant carries structured context (backend name, operation, path) so
+/// callers can present meaningful diagnostics without parsing error strings.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("operation `{operation}` is not supported by backend `{backend}`")]

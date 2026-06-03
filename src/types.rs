@@ -21,6 +21,22 @@ pub fn sanitize_snapshot_label(label: &str) -> String {
 }
 
 /// Stable identifier for a live volume, filesystem, dataset, or provider-specific source.
+///
+/// The `id` string is interpreted by each backend:
+/// - **Btrfs**: absolute subvolume path (e.g. `"/mnt/data/subvol"`)
+/// - **LVM**: `/dev/<vg>/<lv>` path (e.g. `"/dev/vg0/data"`)
+/// - **ZFS**: dataset name (e.g. `"tank/data"`) or mount path
+/// - **Windows**: drive letter (e.g. `"C:"`) or volume GUID path
+///
+/// # Examples
+///
+/// ```
+/// use vpt_rs::VolumeRef;
+///
+/// let vol = VolumeRef::new("/mnt/data/subvol");
+/// assert_eq!(vol.id, "/mnt/data/subvol");
+/// assert_eq!(vol.to_string(), "/mnt/data/subvol");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VolumeRef {
     pub id: String,
@@ -84,6 +100,12 @@ impl std::fmt::Display for Capability {
 }
 
 /// Snapshot consistency intent shared across providers.
+///
+/// - `CrashConsistent`: equivalent to pulling the power plug — filesystem-consistent
+///   but no application quiescing. Supported by all backends.
+/// - `ApplicationConsistent`: coordinates with VSS writers (Windows) to flush
+///   application buffers before snapshotting. Only supported when writer
+///   coordination is enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SnapshotKind {
     CrashConsistent,
@@ -122,6 +144,19 @@ impl std::str::FromStr for SnapshotKind {
 }
 
 /// Generic request for creating a provider-managed snapshot.
+///
+/// # Examples
+///
+/// ```
+/// use vpt_rs::{SnapshotRequest, SnapshotKind, VolumeRef};
+///
+/// let request = SnapshotRequest {
+///     source: VolumeRef::new("/mnt/data/subvol"),
+///     kind: SnapshotKind::CrashConsistent,
+///     label: Some("nightly".to_string()),
+///     read_only: true,
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotRequest {
     pub source: VolumeRef,
@@ -131,6 +166,12 @@ pub struct SnapshotRequest {
 }
 
 /// Concrete snapshot handle returned by snapshot providers.
+///
+/// The `id` format is provider-specific:
+/// - Btrfs: absolute path to the snapshot subvolume
+/// - LVM: `/dev/<vg>/<snapshot_lv>`
+/// - ZFS: `dataset@snapshot_name`
+/// - VSS: `{GUID}`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotHandle {
     pub id: String,
@@ -240,6 +281,25 @@ impl SnapshotPolicy {
 ///
 /// `block_size` controls the I/O chunk size for block-level copy operations (e.g. LVM dd).
 /// `None` uses the provider default (4 MiB).
+///
+/// # Examples
+///
+/// ```
+/// use vpt_rs::{BackupPlan, BackupSource, BackupTarget, SnapshotPolicy, SnapshotKind, VolumeRef};
+/// use std::path::PathBuf;
+///
+/// let plan = BackupPlan {
+///     source: BackupSource::Volume(VolumeRef::new("/dev/vg0/data")),
+///     target: BackupTarget::ImageFile(PathBuf::from("/tmp/backup.img")),
+///     snapshot_policy: SnapshotPolicy::temporary(
+///         SnapshotKind::CrashConsistent,
+///         Some("backup".to_string()),
+///         true,
+///     ),
+///     parent_snapshot: None,
+///     block_size: None,
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupPlan {
     pub source: BackupSource,
