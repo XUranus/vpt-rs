@@ -3,79 +3,77 @@
 ## Linux
 
 ### Btrfs
-Status: partially implemented.
+Status: implemented.
 
 Implemented:
 
-- snapshot create/list/delete
-- send-based backup to a stream file
-- receive-based restore from a stream file
-- capability reporting and CLI selection
+- snapshot create/list/delete via `btrfs subvolume snapshot`, `btrfs subvolume list -s`, `btrfs subvolume delete`
+- send-based backup to a stream file via `btrfs send`
+- receive-based restore from a stream file via `btrfs receive`
+- incremental send with parent snapshot (`btrfs send -p`)
 - temporary snapshot policy for backup planning
-- parent snapshot support in send planning
+- snapshot path derivation under `.vb-snapshots/` hidden directory
+- capability reporting and CLI selection
 - backup CLI control over snapshot kind/label/read-only policy
 
 Not implemented:
 
-- mount/unmount flows
+- mount/unmount flows (capabilities removed until implemented)
 - privileged round-trip integration tests against a real Btrfs filesystem
 
 ### LVM
-Status: partially implemented.
+Status: implemented.
 
 Implemented:
 
-- backend registration
-- capability reporting
-- CLI selection path
-- logical volume path parsing
-- snapshot create/list/delete through the LVM CLI
-- read-only snapshot permission adjustment after creation
-- image-file backup through `dd`
-- image-file restore through `dd`
+- logical volume path parsing (`/dev/<vg>/<lv>`)
+- snapshot create/list/delete through the LVM CLI (`lvcreate --snapshot`, `lvs`, `lvremove`)
+- read-only snapshot permission adjustment (`lvchange --permission r`)
+- image-file backup through block-level copy (`copy_blocks`, default 4 MiB)
+- image-file restore through block-level copy (requires `--force`)
 - temporary snapshot policy for backup planning
 - explicit `--force` guard for destructive restore
+- capability reporting and CLI selection
 
 Not implemented:
 
-- mount/unmount flows
+- mount/unmount flows (capabilities removed until implemented)
 - incremental/differential export semantics
 
 ### ZFS
-Status: partially implemented.
+Status: implemented.
 
 Implemented:
 
-- backend registration
-- capability reporting
-- CLI selection path
-- dataset reference parsing
-- snapshot create/list/delete through the ZFS CLI
-- snapshot enumeration parsing from `zfs list -t snapshot`
-- file-based backup through `zfs send`
-- file-based restore through `zfs receive`
+- dataset reference parsing (dataset name or mount path)
+- snapshot create/list/delete through the ZFS CLI (`zfs snapshot`, `zfs list -t snapshot`, `zfs destroy`)
+- file-based backup through `zfs send` (with `-i` for incremental)
+- file-based restore through `zfs receive` (with `-F` for force)
 - parent snapshot support in send planning
-- backup CLI control over explicit snapshot sources and parent snapshots
+- explicit snapshot source requirement for backup (or temporary snapshot policy)
+- rejection of mount-path destinations for receive
+- capability reporting and CLI selection
 
 Not implemented:
 
-- dataset-oriented restore planning
-- automatic snapshot creation for backup
-- mount/unmount flows
-- privileged integration tests against a real ZFS environment
+- mount/unmount flows (capabilities removed until implemented)
+- automatic snapshot creation for backup without explicit snapshot policy
 
 ## Windows
-Status: architecture prepared, implementation not started.
+Status: implemented (feature-gated: `windows-vss`).
 
-The project includes a dedicated VSS module tree for:
+The Windows backend uses a dual-path strategy:
 
-- request validation
-- requestor/session separation
-- a feature-gated FFI seam for future COM bindings
+- **CLI path (primary)**: `wmic shadowcopy` for snapshot creation and device path retrieval, `vssadmin` for listing and deletion. Works on all Windows editions (Home, Pro, Server).
+- **COM API (fallback)**: Native `IVssBackupComponents` and `IVssCoordinator` via raw vtable FFI. Used primarily for snapshot deletion when CLI fails.
 
-The real VSS COM implementation remains TODO.
+Known limitations:
+
+- COM snapshot creation (`InitializeForBackup`) returns `VSS_E_BAD_STATE` on some Windows editions due to vtable layout mismatches. See `TODO.md` for detailed analysis.
+- The CLI path handles all snapshot creation reliably.
+- Mount/unmount flows are not implemented (capabilities removed).
 
 ## macOS And Generic Unix
 Status: stubbed.
 
-Current modules expose backend identities and capability sets, but no operational snapshot logic yet.
+Current modules expose backend identities and capability sets, but no operational snapshot logic yet. All trait methods return `UnsupportedOperation`.

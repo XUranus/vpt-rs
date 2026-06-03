@@ -61,8 +61,9 @@ Options:
   --parent-snapshot <id>        Parent snapshot for incremental backup
   --snapshot-kind <type>        Snapshot consistency: crash (default) or application
   --snapshot-label <name>       Label for the snapshot
-  --snapshot-read-write>        Make snapshot read-write (default is read-only)
+  --snapshot-read-write         Make snapshot read-write (default is read-only)
   --no-snapshot                 Skip snapshot creation
+  --block-size <N[K|M|G]>      I/O block size (default: 4M)
 ```
 
 ### `vptcli restore`
@@ -74,28 +75,34 @@ vptcli restore <destination> --input <file> [options]
 
 Options:
   --provider <name>             Select backend (btrfs, lvm, zfs)
-  --force                       Force destructive restore (e.g. LVM dd overwrite)
+  --force                       Force destructive restore (e.g. LVM or VSS overwrite)
   --base-snapshot <id>          Base snapshot for incremental restore
+  --block-size <N[K|M|G]>      I/O block size (default: 4M)
 ```
 
 ## Platform Support
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Linux (btrfs) | Implemented | `btrfs send`/`btrfs receive` |
-| Linux (LVM) | Implemented | `dd` block-level copy |
-| Linux (ZFS) | Implemented | `zfs send`/`zfs receive` |
+| Linux (btrfs) | Implemented | `btrfs send`/`btrfs receive`, incremental send |
+| Linux (LVM) | Implemented | Block-level copy via `copy_blocks` |
+| Linux (ZFS) | Implemented | `zfs send`/`zfs receive`, incremental send |
+| Windows | Implemented | VSS snapshots via CLI (wmic/vssadmin), COM fallback for delete |
 | macOS | Stubbed | Architecture prepared for APFS |
-| Windows | Stubbed | VSS module scaffolded (feature: `windows-vss`) |
+| Generic Unix | Stubbed | Architecture prepared for future backends |
 
 ## Library Usage
 
 ```rust
 use vpt_rs::platform;
-use vpt_rs::{SnapshotProvider, BackupPlan, BackupSource, BackupTarget, VolumeRef};
+use vpt_rs::{Backend, SnapshotProvider, BackupPlan, BackupSource, BackupTarget, VolumeRef};
 
 // Get the current platform backend
 let backend = platform::current_backend();
+
+// Query capabilities
+println!("backend: {}", backend.backend_name());
+assert!(backend.supports(vpt_rs::Capability::CrashConsistentSnapshot));
 
 // List snapshots
 let snapshots = backend.list_snapshots(&VolumeRef::new("/mnt/data"))?;
@@ -105,10 +112,11 @@ let snapshots = backend.list_snapshots(&VolumeRef::new("/mnt/data"))?;
 
 | Trait | Purpose |
 |-------|---------|
+| `Backend` | Common interface: `backend_name()`, `capabilities()`, `supports()` |
 | `SnapshotProvider` | Create, list, delete snapshots |
-| `BlockDeviceCopier` | Backup and restore volumes |
-| `RestorePlanner` | Plan restore operations |
-| `MountManager` | Mount/unmount snapshots and volumes |
+| `BackupExecutor` | Execute backup plans (stream-based or block-level) |
+| `RestorePlanner` | Execute restore plans |
+| `MountManager` | Mount/unmount snapshots (future) |
 
 ### Key Types
 
@@ -121,33 +129,44 @@ let snapshots = backend.list_snapshots(&VolumeRef::new("/mnt/data"))?;
 ```
 src/
   lib.rs              Public API re-exports
+  backend.rs          Backend supertrait
   types.rs            Shared types (VolumeRef, BackupPlan, etc.)
   snapshot.rs         SnapshotProvider trait
-  backup.rs           BlockDeviceCopier trait
+  backup.rs           BackupExecutor trait
   restore.rs          RestorePlanner trait
   mount.rs            MountManager trait
-  error.rs            Error types
+  error.rs            Error types (thiserror)
+  copy.rs             Block-level copy utility
   logging.rs          Tracing initialization
-  process.rs          External command helpers
+  process.rs          External command helpers (timeout, I/O redirection)
   bin/
     vptcli.rs         CLI binary
   platform/
-    mod.rs            Platform abstraction layer
+    mod.rs            Platform abstraction + StubBackend
     linux/
       mod.rs          Linux backend selector (btrfs/lvm/zfs)
-      btrfs.rs        Btrfs implementation
-      lvm.rs          LVM implementation
-      zfs.rs          ZFS implementation
-    windows.rs        Windows stub + VSS scaffold
-    macos.rs          macOS stub
+      btrfs.rs        Btrfs implementation (send/receive)
+      lvm.rs          LVM implementation (block-level copy)
+      zfs.rs          ZFS implementation (send/receive)
+    windows/
+      vss.rs          VSS snapshot provider orchestration
+      vss/
+        ffi.rs        FFI routing (CLI primary, COM fallback)
+        ffi/cli.rs    wmic/vssadmin CLI wrappers
+        ffi/com.rs    Native COM API (raw vtable FFI)
+        requestor.rs  VSS requestor (init, sessions)
+        session.rs    VSS session (commit/abort)
+    windows.rs        Windows backend (feature-gated VSS)
+    macos.rs          macOS stub (macos-apfs)
     unix.rs           Generic Unix stub
 tests/
-  env.py              Test infrastructure
+  env.py              Test infrastructure (UUID isolation, CLI wrappers)
+  test_smoke.py       CLI smoke tests (no root required)
   test_btrfs.py       Btrfs roundtrip integration test
   test_lvm.py         LVM roundtrip integration test
   test_zfs.py         ZFS roundtrip integration test
-  test_smoke.py       CLI smoke tests
-  run_all.py          Test runner
+  test_vss.py         Windows VSS roundtrip integration test
+  run_all.py          Test runner with per-provider selection
   README.md           Test documentation
 ```
 

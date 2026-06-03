@@ -1,64 +1,98 @@
-# Integration Scripts
+# Integration Tests
 
-The repository now includes filesystem-backed integration scripts under `scripts/integration/`.
+The repository includes Python-based integration tests under `tests/` that exercise the full backup/restore lifecycle against real storage backends.
 
-## Available Scripts
-- `scripts/integration/btrfs-roundtrip.sh`
-- `scripts/integration/lvm-snapshot.sh`
-- `scripts/integration/zfs-roundtrip.sh`
-- `scripts/integration/run-all.sh`
+## Available Tests
 
-## Environment Assumptions
-- image files are created under `/opt/volumeset`
-- backup streams are written under `/opt/volumeset/copy`
-- mounts use subdirectories under `/mnt/volmnt`
-- each script keeps image sizes at `2G`, well below the requested limits
-- `IMAGE_DIR`, `COPY_DIR`, and `MOUNT_ROOT` can be overridden from the environment when needed
-- `ASSERT_RESTORE_CONTENTS=0` disables restored-data checks when you only want lifecycle coverage
-- `ASSERT_SNAPSHOT_CLEANUP=0` disables post-delete / temporary-snapshot cleanup assertions
+| Test File | Provider | Root Required | Description |
+|-----------|----------|---------------|-------------|
+| `tests/test_smoke.py` | all | No | CLI smoke tests: backend list, capabilities, usage output, invalid provider rejection |
+| `tests/test_btrfs.py` | btrfs | Yes | Full Btrfs roundtrip on loopback filesystem |
+| `tests/test_lvm.py` | lvm | Yes | Full LVM roundtrip on loopback PV/VG/LV |
+| `tests/test_zfs.py` | zfs | Yes | Full ZFS roundtrip on file-backed zpool |
+| `tests/test_vss.py` | vss | Yes (Windows) | Full VSS roundtrip on VHD files |
 
-## What Each Script Covers
+## Test Runner
 
-### Btrfs
-- creates a loopback Btrfs filesystem
-- creates a source subvolume
-- runs `vptcli snapshot create/list`
-- runs `vptcli backup` and `vptcli restore`
-- validates that restored file content exists
-- validates that the temporary backup snapshot is removed
-- deletes the manual snapshot and verifies it is no longer listed
-
-### LVM
-- creates a loopback PV/VG/LV
-- formats source and restore logical volumes as `ext4`
-- runs `vptcli snapshot create/list/delete`
-- runs `vptcli backup` to export the source LV to an image file
-- runs `vptcli restore --force` to write that image into a restore LV
-- validates restored file content
-- verifies that the deleted snapshot is no longer listed
-
-### ZFS
-- creates a file-backed zpool
-- creates a dataset and snapshot
-- runs `vptcli snapshot list`
-- runs `vptcli backup` from an explicit snapshot source
-- runs `vptcli restore --force` into a destination dataset
-- validates restored file content
-- deletes the source snapshot and verifies it is no longer listed
-
-## Running
-These scripts require privileges for loop devices, mounts, and storage management. Run them directly from the repository root or invoke them with an appropriate privileged shell.
-
-Example:
+`tests/run_all.py` runs all provider tests with configurable options:
 
 ```bash
-sudo IMAGE_DIR=/opt/volumeset COPY_DIR=/opt/volumeset/copy MOUNT_ROOT=/mnt/volmnt \
-  bash scripts/integration/btrfs-roundtrip.sh
+# Run all tests (requires root)
+sudo python3 tests/run_all.py
+
+# Run specific providers
+sudo python3 tests/run_all.py --providers btrfs,lvm
+
+# Build before testing
+sudo python3 tests/run_all.py --build
+
+# Keep artifacts after test
+sudo python3 tests/run_all.py --providers btrfs --keep
+
+# Custom timeout (seconds)
+sudo python3 tests/run_all.py --timeout 300
 ```
 
-To run all currently available integration scripts:
+## Smoke Tests
+
+Smoke tests require no root privileges and work on all platforms:
 
 ```bash
-sudo IMAGE_DIR=/opt/volumeset COPY_DIR=/opt/volumeset/copy MOUNT_ROOT=/mnt/volmnt \
-  bash scripts/integration/run-all.sh
+python3 tests/test_smoke.py
 ```
+
+These tests verify:
+- Backend listing (`vptcli snapshot backend list`)
+- Capability reporting per provider
+- Usage output for snapshot/backup/restore subcommands
+- Invalid provider rejection
+
+## Provider Roundtrip Tests
+
+Each provider test follows an 11-step lifecycle:
+
+1. **Volume init** — create loop device / zpool / VHD, format filesystem
+2. **Mount** — mount the volume
+3. **Write data** — create 3 test files with known content
+4. **Snapshot create** — `vptcli snapshot create`
+5. **Snapshot list** — verify snapshot appears in `vptcli snapshot list`
+6. **Backup** — `vptcli backup` to stream/image file
+7. **Restore** — `vptcli restore` to destination volume
+8. **Mount restored** — mount the restored volume
+9. **Verify files** — check all 3 files match original content
+10. **Snapshot delete** — `vptcli snapshot delete`, verify removal
+11. **Teardown** — unmount, detach loop device, remove artifacts
+
+## Configuration
+
+Environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TEST_DATA_ROOT` | `/tmp/testvolumedata` | Root for test data files |
+| `TEST_MOUNT_ROOT` | `/tmp/testvolumemnt` | Root for mount points |
+| `TEST_ID` | auto-generated UUID | Test isolation namespace |
+| `TEST_CLEANUP` | `1` | Set to `0` to skip cleanup |
+| `TEST_KEEP_ARTIFACTS` | `0` | Set to `1` to keep image/stream files |
+| `VPT_PROJECT_ROOT` | auto-detected | Project root directory |
+| `RUST_LOG` | `vpt_rs=debug` | Log level for CLI tracing |
+
+## Prerequisites
+
+Each provider requires specific system packages:
+
+| Provider | Required Commands | Packages (Debian/Ubuntu) |
+|----------|-------------------|--------------------------|
+| common | `losetup`, `truncate` | `util-linux`, `coreutils` |
+| btrfs | `mkfs.btrfs`, `btrfs` | `btrfs-progs` |
+| lvm | `pvcreate`, `vgcreate`, `lvcreate`, `lvremove`, `vgremove`, `pvremove`, `mkfs.ext4` | `lvm2`, `e2fsprogs` |
+| zfs | `zpool`, `zfs` | `zfsutils-linux` |
+
+All provider tests require root privileges (use `sudo`).
+
+## Logs
+
+Each test creates per-test log files under `<TEST_DATA_ROOT>/<TEST_ID>/logs/`:
+
+- `<test-name>.log` — Python test log
+- `cli.log` — CLI tracing output (RUST_LOG)
