@@ -124,6 +124,10 @@ fn wait_with_timeout(
     timeout: Duration,
 ) -> Result<Option<ExitStatus>> {
     let started = Instant::now();
+    // Start with a short poll for fast-exiting commands, then back off to
+    // reduce CPU usage for long-running operations.
+    let mut poll_interval = Duration::from_millis(10);
+    let max_interval = Duration::from_millis(200);
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(Some(status));
@@ -133,7 +137,8 @@ fn wait_with_timeout(
             return Ok(None);
         }
 
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(poll_interval);
+        poll_interval = (poll_interval * 2).min(max_interval);
     }
 }
 
