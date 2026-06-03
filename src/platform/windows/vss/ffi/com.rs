@@ -204,36 +204,53 @@ impl ComPtr {
         self.ptr.is_null()
     }
 
+    /// # Safety
+    /// Caller must ensure `self.ptr` is a valid COM pointer to an `IVssBackupComponents`
+    /// interface. The returned reference is valid as long as the COM object lives.
     unsafe fn backup_components_vtbl(&self) -> &IVssBackupComponentsVtbl {
+        // SAFETY: COM vtable pointer is always the first pointer-sized field of the object.
+        // Dereferencing to read the vtable pointer is safe if the COM object is valid.
         unsafe {
             let vtbl_ptr = *(self.ptr as *const *const IVssBackupComponentsVtbl);
             &*vtbl_ptr
         }
     }
 
+    /// # Safety
+    /// Caller must ensure `self.ptr` is a valid COM pointer to an `IVssAsync` interface.
     unsafe fn async_vtbl(&self) -> &IVssAsyncVtbl {
+        // SAFETY: Same vtable layout convention as backup_components_vtbl.
         unsafe {
             let vtbl_ptr = *(self.ptr as *const *const IVssAsyncVtbl);
             &*vtbl_ptr
         }
     }
 
+    /// # Safety
+    /// Caller must ensure `self.ptr` is a valid COM pointer to an `IVssEnumObject` interface.
     unsafe fn enum_vtbl(&self) -> &IVssEnumObjectVtbl {
+        // SAFETY: Same vtable layout convention.
         unsafe {
             let vtbl_ptr = *(self.ptr as *const *const IVssEnumObjectVtbl);
             &*vtbl_ptr
         }
     }
 
+    /// # Safety
+    /// Caller must ensure `self.ptr` is a valid COM pointer to an `IVssCoordinator` interface.
     unsafe fn coordinator_vtbl(&self) -> &IVssCoordinatorVtbl {
+        // SAFETY: Same vtable layout convention.
         unsafe {
             let vtbl_ptr = *(self.ptr as *const *const IVssCoordinatorVtbl);
             &*vtbl_ptr
         }
     }
 
+    /// Release the COM object. Safe to call multiple times (nulls the pointer after release).
     fn release(&mut self) {
         if !self.ptr.is_null() {
+            // SAFETY: self.ptr is non-null and was obtained from a COM Create/CoCreateInstance
+            // call, so it has a valid vtable with Release at index 2 (IUnknown).
             unsafe {
                 let vtbl_ptr = *(self.ptr as *const *const IVssBackupComponentsVtbl);
                 ((*vtbl_ptr).release)(self.ptr);
@@ -370,11 +387,19 @@ fn create_backup_components() -> Result<ComPtr> {
 
 // ── Async wait ─────────────────────────────────────────────────────────────
 
+/// Block until an IVssAsync operation completes.
+///
+/// # Safety
+/// `async_obj` must be a valid `IVssAsync` COM pointer obtained from a VSS method
+/// (e.g., `PrepareForBackup` or `DoSnapshotSet`).
 fn wait_for_async(async_obj: ComPtr, operation: &str) -> Result<()> {
     if async_obj.is_null() {
         return Ok(());
     }
 
+    // SAFETY: async_obj is a valid IVssAsync COM pointer. The vtable accessor reads
+    // the first pointer-sized field which is the vtable pointer (COM convention).
+    // Wait() and QueryStatus() are at known offsets in the IVssAsync vtable.
     unsafe {
         let vtbl = async_obj.async_vtbl();
 
@@ -523,6 +548,11 @@ pub fn create_snapshot(volume_path: &str) -> Result<super::RawSnapshotSet> {
     // Create IVssBackupComponents
     let bc = create_backup_components()?;
 
+    // SAFETY: `bc` is a valid IVssBackupComponents COM pointer obtained from
+    // CreateVssBackupComponentsInternal in vssapi.dll. All vtable method pointers
+    // are called with the correct COM object pointer as the first argument.
+    // Vtable indices match the Windows SDK IVssBackupComponents interface layout
+    // (empirically verified — see TODO.md for vtable debugging notes).
     unsafe {
         let vtbl = bc.backup_components_vtbl();
 
