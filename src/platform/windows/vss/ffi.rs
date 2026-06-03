@@ -20,9 +20,7 @@ fn validate_snapshot_id(id: &str) -> Result<()> {
     let trimmed = id.trim();
     if trimmed.starts_with('{')
         && trimmed.ends_with('}')
-        && trimmed[1..trimmed.len() - 1]
-            .split('-')
-            .count() == 5
+        && trimmed[1..trimmed.len() - 1].split('-').count() == 5
         && trimmed[1..trimmed.len() - 1]
             .chars()
             .all(|c| c.is_ascii_hexdigit() || c == '-')
@@ -30,7 +28,9 @@ fn validate_snapshot_id(id: &str) -> Result<()> {
         Ok(())
     } else {
         Err(Error::InvalidArgument {
-            message: format!("invalid snapshot ID format (expected GUID like '{{12345678-ABCD-EF01-1122-334455667788}}'): `{id}`"),
+            message: format!(
+                "invalid snapshot ID format (expected GUID like '{{12345678-ABCD-EF01-1122-334455667788}}'): `{id}`"
+            ),
         })
     }
 }

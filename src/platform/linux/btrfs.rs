@@ -10,9 +10,9 @@ use crate::process::{self, CommandIo};
 use crate::restore::RestorePlanner;
 use crate::snapshot::SnapshotProvider;
 use crate::types::{
-    sanitize_snapshot_label, BackupPlan, BackupSource, Capability, MountHandle, MountRequest,
-    RestorePlan, SnapshotHandle, SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRef,
-    SnapshotRequest, VolumeRef,
+    BackupPlan, BackupSource, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle,
+    SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRef, SnapshotRequest, VolumeRef,
+    sanitize_snapshot_label,
 };
 
 const CAPABILITIES: &[Capability] = &[

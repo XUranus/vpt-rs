@@ -7,7 +7,7 @@ use std::ffi::c_void;
 use std::ptr;
 use std::sync::OnceLock;
 
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 use crate::error::{Error, Result};
 use crate::types::{SnapshotHandle, SnapshotInfo, VolumeRef};
@@ -30,7 +30,6 @@ const VSS_OBJECT_SNAPSHOT_SET: u32 = 2;
 const VSS_S_ASYNC_FINISHED: i32 = 0x00042304;
 const VSS_S_ASYNC_PENDING: i32 = 0x00042302;
 
-
 // ── VSS_ID (GUID) ─────────────────────────────────────────────────────────
 
 #[repr(C)]
@@ -44,15 +43,26 @@ pub struct VssId {
 
 impl VssId {
     const ZERO: Self = Self {
-        data1: 0, data2: 0, data3: 0, data4: [0; 8],
+        data1: 0,
+        data2: 0,
+        data3: 0,
+        data4: [0; 8],
     };
 
     pub fn to_guid_string(&self) -> String {
         format!(
             "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
-            self.data1, self.data2, self.data3,
-            self.data4[0], self.data4[1], self.data4[2], self.data4[3],
-            self.data4[4], self.data4[5], self.data4[6], self.data4[7],
+            self.data1,
+            self.data2,
+            self.data3,
+            self.data4[0],
+            self.data4[1],
+            self.data4[2],
+            self.data4[3],
+            self.data4[4],
+            self.data4[5],
+            self.data4[6],
+            self.data4[7],
         )
     }
 }
@@ -108,10 +118,12 @@ struct IVssBackupComponentsVtbl {
     _free_writer_metadata: *const c_void,
     _add_component: *const c_void,
     prepare_for_backup: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32,
-    add_to_snapshot_set: unsafe extern "system" fn(*mut c_void, *const u16, VssId, *mut VssId) -> i32,
+    add_to_snapshot_set:
+        unsafe extern "system" fn(*mut c_void, *const u16, VssId, *mut VssId) -> i32,
     do_snapshot_set: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32,
     _commit_snapshot_set: *const c_void,
-    get_snapshot_properties: unsafe extern "system" fn(*mut c_void, VssId, *mut VssSnapshotProp) -> i32,
+    get_snapshot_properties:
+        unsafe extern "system" fn(*mut c_void, VssId, *mut VssSnapshotProp) -> i32,
     _get_writer_status: *const c_void,
     set_backup_state: unsafe extern "system" fn(*mut c_void, bool, bool, u32, bool) -> i32,
     _set_backup_succeeded: *const c_void,
@@ -133,7 +145,8 @@ struct IVssBackupComponentsVtbl {
     _enable_writer_classes: *const c_void,
     _disable_writer_instances: *const c_void,
     _expose_snapshot: *const c_void,
-    delete_snapshots: unsafe extern "system" fn(*mut c_void, VssId, u32, bool, *mut i32, *mut VssId) -> i32,
+    delete_snapshots:
+        unsafe extern "system" fn(*mut c_void, VssId, u32, bool, *mut i32, *mut VssId) -> i32,
 }
 
 // ── IVssAsync vtable ───────────────────────────────────────────────────────
@@ -180,9 +193,8 @@ struct IVssCoordinatorVtbl {
     _pad9: *const c_void,
     _pad10: *const c_void,
     // Index 11: DeleteSnapshots
-    delete_snapshots: unsafe extern "system" fn(
-        *mut c_void, VssId, u32, bool, *mut i32, *mut VssId,
-    ) -> i32,
+    delete_snapshots:
+        unsafe extern "system" fn(*mut c_void, VssId, u32, bool, *mut i32, *mut VssId) -> i32,
 }
 
 // ── COM pointer wrapper ────────────────────────────────────────────────────
@@ -273,8 +285,8 @@ unsafe impl Sync for ComPtr {}
 // ── Windows FFI (from windows crate) ──────────────────────────────────────
 
 use windows::Win32::System::Com::{
-    CoInitializeEx, CoInitializeSecurity, COINIT_MULTITHREADED,
-    RPC_C_AUTHN_LEVEL, RPC_C_IMP_LEVEL, EOAC_DYNAMIC_CLOAKING,
+    COINIT_MULTITHREADED, CoInitializeEx, CoInitializeSecurity, EOAC_DYNAMIC_CLOAKING,
+    RPC_C_AUTHN_LEVEL, RPC_C_IMP_LEVEL,
 };
 
 // Raw extern for functions not in windows crate
@@ -305,15 +317,15 @@ fn ensure_com_initialized() -> Result<()> {
                 // CoInitializeSecurity — CRITICAL for VSS COM calls
                 // Exact params from C++ VssClient.cpp line 596-606
                 let hr_sec = CoInitializeSecurity(
-                    None,                                  // pSecDesc
-                    -1,                                    // cAuthSvc (-1 = default)
-                    None,                                  // asAuthSvc
-                    None,                                  // pReserved1
-                    RPC_C_AUTHN_LEVEL(6),                  // RPC_C_AUTHN_LEVEL_PKT_PRIVACY
-                    RPC_C_IMP_LEVEL(3),                    // RPC_C_IMP_LEVEL_IMPERSONATE
-                    None,                                  // pAuthList
-                    EOAC_DYNAMIC_CLOAKING,                  // 0x40
-                    None,                                  // pReserved3
+                    None,                  // pSecDesc
+                    -1,                    // cAuthSvc (-1 = default)
+                    None,                  // asAuthSvc
+                    None,                  // pReserved1
+                    RPC_C_AUTHN_LEVEL(6),  // RPC_C_AUTHN_LEVEL_PKT_PRIVACY
+                    RPC_C_IMP_LEVEL(3),    // RPC_C_IMP_LEVEL_IMPERSONATE
+                    None,                  // pAuthList
+                    EOAC_DYNAMIC_CLOAKING, // 0x40
+                    None,                  // pReserved3
                 );
                 if hr_sec.is_err() {
                     return Err(Error::Message {
@@ -336,8 +348,7 @@ fn ensure_com_initialized() -> Result<()> {
 
 // ── Dynamic loading fallback ───────────────────────────────────────────────
 
-type CreateVssBackupComponentsInternalFn =
-    unsafe extern "system" fn(*mut *mut c_void) -> i32;
+type CreateVssBackupComponentsInternalFn = unsafe extern "system" fn(*mut *mut c_void) -> i32;
 
 fn create_backup_components_dyn() -> Result<ComPtr> {
     let name = wide_string("vssapi.dll");
@@ -356,8 +367,7 @@ fn create_backup_components_dyn() -> Result<ComPtr> {
     for name in names {
         let proc = unsafe { GetProcAddress(handle, name.as_ptr()) };
         if !proc.is_null() {
-            let fn_ptr: CreateVssBackupComponentsInternalFn =
-                unsafe { std::mem::transmute(proc) };
+            let fn_ptr: CreateVssBackupComponentsInternalFn = unsafe { std::mem::transmute(proc) };
             let mut raw: *mut c_void = ptr::null_mut();
             let hr = unsafe { fn_ptr(&mut raw) };
             unsafe { FreeLibrary(handle) };
@@ -481,7 +491,12 @@ fn parse_guid(s: &str) -> Result<VssId> {
             }
         })?;
     }
-    Ok(VssId { data1, data2, data3, data4 })
+    Ok(VssId {
+        data1,
+        data2,
+        data3,
+        data4,
+    })
 }
 
 // ── Volume path normalization ──────────────────────────────────────────────
@@ -557,10 +572,16 @@ pub fn create_snapshot(volume_path: &str) -> Result<super::RawSnapshotSet> {
         let vtbl = bc.backup_components_vtbl();
 
         // InitializeForBackup() — NO args (matching C++ line 624)
-        hr_ok((vtbl.initialize_for_backup)(bc.as_ptr()), "InitializeForBackup")?;
+        hr_ok(
+            (vtbl.initialize_for_backup)(bc.as_ptr()),
+            "InitializeForBackup",
+        )?;
 
         // SetContext(VSS_CTX_APP_ROLLBACK) — matching C++ line 627
-        hr_ok((vtbl.set_context)(bc.as_ptr(), VSS_CTX_APP_ROLLBACK), "SetContext")?;
+        hr_ok(
+            (vtbl.set_context)(bc.as_ptr(), VSS_CTX_APP_ROLLBACK),
+            "SetContext",
+        )?;
 
         // SetBackupState(true, false, VSS_BT_FULL, false) — 4 args! matching C++ line 630
         hr_ok(
@@ -579,7 +600,12 @@ pub fn create_snapshot(volume_path: &str) -> Result<super::RawSnapshotSet> {
         let volume_wide = wide_string(&volume);
         let mut snapshot_id = VssId::ZERO;
         hr_ok(
-            (vtbl.add_to_snapshot_set)(bc.as_ptr(), volume_wide.as_ptr(), VssId::ZERO, &mut snapshot_id),
+            (vtbl.add_to_snapshot_set)(
+                bc.as_ptr(),
+                volume_wide.as_ptr(),
+                VssId::ZERO,
+                &mut snapshot_id,
+            ),
             "AddToSnapshotSet",
         )?;
 
@@ -661,7 +687,10 @@ pub fn delete_snapshot(snapshot_id: &str) -> Result<()> {
             &mut deleted_count,
             &mut non_deleted,
         );
-        debug!("DeleteSnapshots returned 0x{:08X}, deleted={}", hr as u32, deleted_count);
+        debug!(
+            "DeleteSnapshots returned 0x{:08X}, deleted={}",
+            hr as u32, deleted_count
+        );
         hr_ok(hr, "DeleteSnapshots")?;
     }
 
@@ -674,12 +703,16 @@ pub fn delete_snapshot(snapshot_id: &str) -> Result<()> {
 fn create_coordinator() -> Result<ComPtr> {
     // CLSID_VSSCoordinator: {E579AB5F-1CC4-44b4-BED9-DE0991FF0623}
     let clsid = VssId {
-        data1: 0xE579AB5F, data2: 0x1CC4, data3: 0x44b4,
+        data1: 0xE579AB5F,
+        data2: 0x1CC4,
+        data3: 0x44b4,
         data4: [0xBE, 0xD9, 0xDE, 0x09, 0x91, 0xFF, 0x06, 0x23],
     };
     // IID_IVssCoordinator: {DA9F41D4-1A5D-41d0-A614-6DFD78DF5D05}
     let iid = VssId {
-        data1: 0xDA9F41D4, data2: 0x1A5D, data3: 0x41d0,
+        data1: 0xDA9F41D4,
+        data2: 0x1A5D,
+        data3: 0x41d0,
         data4: [0xA6, 0x14, 0x6D, 0xFD, 0x78, 0xDF, 0x5D, 0x05],
     };
 
@@ -691,10 +724,7 @@ fn create_coordinator() -> Result<ComPtr> {
 
 // Raw ole32 CoCreateInstance - use windows_core::link! macro for deferred loading.
 // This avoids name conflicts with the windows crate's typed wrapper.
-fn ole32_co_create_instance(
-    clsid: &VssId,
-    iid: &VssId,
-) -> Result<*mut c_void> {
+fn ole32_co_create_instance(clsid: &VssId, iid: &VssId) -> Result<*mut c_void> {
     // Use the windows crate's internal CoCreateInstance with raw pointers
     let clsid_guid: &windows::core::GUID = unsafe { std::mem::transmute(clsid) };
     let iid_guid: &windows::core::GUID = unsafe { std::mem::transmute(iid) };
@@ -702,7 +732,11 @@ fn ole32_co_create_instance(
 
     // Call ole32!CoCreateInstance directly via raw FFI
     type CoCreateInstanceFn = unsafe extern "system" fn(
-        *const VssId, *const c_void, u32, *const VssId, *mut *mut c_void,
+        *const VssId,
+        *const c_void,
+        u32,
+        *const VssId,
+        *mut *mut c_void,
     ) -> i32;
 
     // The windows crate already links ole32.dll, so we can use GetProcAddress
@@ -726,10 +760,7 @@ fn ole32_co_create_instance(
 }
 
 /// List all VSS snapshots matching the given volume, using IVssBackupComponents::Query.
-pub fn list_snapshots(
-    source: &VolumeRef,
-    backend: &'static str,
-) -> Result<Vec<SnapshotInfo>> {
+pub fn list_snapshots(source: &VolumeRef, backend: &'static str) -> Result<Vec<SnapshotInfo>> {
     ensure_com_initialized()?;
 
     let volume_path = normalize_volume_path(&source.id);
@@ -745,9 +776,9 @@ pub fn list_snapshots(
         let mut enum_raw: *mut c_void = ptr::null_mut();
         let hr = (vtbl.query)(
             bc.as_ptr(),
-            VssId::ZERO,          // IID_NULL
-            VSS_OBJECT_NONE,      // eObjectType
-            VSS_OBJECT_SNAPSHOT,  // eReturnedObjectsType
+            VssId::ZERO,         // IID_NULL
+            VSS_OBJECT_NONE,     // eObjectType
+            VSS_OBJECT_SNAPSHOT, // eReturnedObjectsType
             &mut enum_raw,
         );
         if hr < 0 || enum_raw.is_null() {
@@ -768,9 +799,10 @@ pub fn list_snapshots(
 
             if prop.object_type == VSS_OBJECT_SNAPSHOT {
                 let orig_vol = from_wide_ptr(prop.snapshot.original_volume_name);
-                if orig_vol.trim_end_matches('\\').eq_ignore_ascii_case(
-                    volume_path.trim_end_matches('\\'),
-                ) {
+                if orig_vol
+                    .trim_end_matches('\\')
+                    .eq_ignore_ascii_case(volume_path.trim_end_matches('\\'))
+                {
                     let device = from_wide_ptr(prop.snapshot.snapshot_device_object);
                     let exposed = from_wide_ptr(prop.snapshot.exposed_name);
                     let path_hint = if !exposed.is_empty() {
@@ -820,10 +852,7 @@ pub fn get_snapshot_device_path(snapshot_id: &str) -> Result<String> {
         let hr = (vtbl.get_snapshot_properties)(bc.as_ptr(), id, &mut props);
         if hr < 0 {
             return Err(Error::Message {
-                message: format!(
-                    "GetSnapshotProperties failed: 0x{:08X}",
-                    hr as u32
-                ),
+                message: format!("GetSnapshotProperties failed: 0x{:08X}", hr as u32),
             });
         }
 

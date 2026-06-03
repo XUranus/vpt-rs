@@ -11,8 +11,8 @@ use crate::process::{self, CommandIo};
 use crate::restore::RestorePlanner;
 use crate::snapshot::SnapshotProvider;
 use crate::types::{
-    sanitize_snapshot_label, BackupPlan, Capability, MountHandle, MountRequest, RestorePlan,
-    SnapshotHandle, SnapshotInfo, SnapshotKind, SnapshotRequest, VolumeRef,
+    BackupPlan, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle, SnapshotInfo,
+    SnapshotKind, SnapshotRequest, VolumeRef, sanitize_snapshot_label,
 };
 
 const CAPABILITIES: &[Capability] = &[
@@ -223,14 +223,15 @@ impl LvmBackend {
         };
 
         let temporary_snapshot = match (&plan.source, &plan.snapshot_policy) {
-            (crate::types::BackupSource::Volume(source), crate::types::SnapshotPolicy::Temporary { kind, label, .. }) => {
-                Some(self.plan_create_snapshot(&SnapshotRequest {
-                    source: source.clone(),
-                    kind: *kind,
-                    label: label.clone(),
-                    read_only: true,
-                })?)
-            }
+            (
+                crate::types::BackupSource::Volume(source),
+                crate::types::SnapshotPolicy::Temporary { kind, label, .. },
+            ) => Some(self.plan_create_snapshot(&SnapshotRequest {
+                source: source.clone(),
+                kind: *kind,
+                label: label.clone(),
+                read_only: true,
+            })?),
             _ => None,
         };
 
@@ -416,7 +417,8 @@ impl BlockDeviceCopier for LvmBackend {
                 }
             }
 
-            let copy_result = copy::copy_blocks(&plan.copy_src, &plan.copy_dst, plan.block_size).map(|_| ());
+            let copy_result =
+                copy::copy_blocks(&plan.copy_src, &plan.copy_dst, plan.block_size).map(|_| ());
             let cleanup_result = if let Some(snapshot) = &plan.temporary_snapshot {
                 self.run_command(&LvmCommand::new(
                     LVREMOVE_BIN,
@@ -627,7 +629,10 @@ snap2|data|/dev/vg0/snap2|Swi-a-r---
             .unwrap();
 
         let snapshot = plan.temporary_snapshot.expect("temporary snapshot");
-        assert_eq!(snapshot.snapshot_path, PathBuf::from("/dev/vg0/backup-snap"));
+        assert_eq!(
+            snapshot.snapshot_path,
+            PathBuf::from("/dev/vg0/backup-snap")
+        );
         assert_eq!(plan.copy_src, PathBuf::from("/dev/vg0/backup-snap"));
         assert_eq!(plan.copy_dst, PathBuf::from("/tmp/data.img"));
         assert_eq!(plan.block_size, copy::DEFAULT_BLOCK_SIZE);

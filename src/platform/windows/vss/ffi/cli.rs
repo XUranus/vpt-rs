@@ -29,7 +29,12 @@ pub fn create_snapshot(volume_path: &str) -> Result<super::RawSnapshotSet> {
 
     // Step 1: Create snapshot
     let output = Command::new("wmic")
-        .args(["shadowcopy", "call", "create", &format!("Volume={volume_wmic}")])
+        .args([
+            "shadowcopy",
+            "call",
+            "create",
+            &format!("Volume={volume_wmic}"),
+        ])
         .output()
         .map_err(|e| Error::Message {
             message: format!("failed to run wmic: {e}"),
@@ -44,10 +49,9 @@ pub fn create_snapshot(volume_path: &str) -> Result<super::RawSnapshotSet> {
         });
     }
 
-    let snapshot_id = parse_wmic_field(&stdout, "ShadowID")
-        .ok_or_else(|| Error::Message {
-            message: format!("could not parse ShadowID from wmic output:\n{stdout}"),
-        })?;
+    let snapshot_id = parse_wmic_field(&stdout, "ShadowID").ok_or_else(|| Error::Message {
+        message: format!("could not parse ShadowID from wmic output:\n{stdout}"),
+    })?;
 
     info!(snapshot_id = %snapshot_id, "VSS snapshot created via wmic");
 
@@ -88,7 +92,8 @@ pub fn delete_snapshot(snapshot_id: &str) -> Result<()> {
         // Also try vssadmin as fallback
         let result = Command::new("vssadmin")
             .args([
-                "delete", "shadows",
+                "delete",
+                "shadows",
                 &format!("/shadow={snapshot_id}"),
                 "/quiet",
             ])
@@ -117,10 +122,7 @@ pub fn delete_snapshot(snapshot_id: &str) -> Result<()> {
 }
 
 /// List VSS snapshots for a given volume.
-pub fn list_snapshots(
-    source: &VolumeRef,
-    backend: &'static str,
-) -> Result<Vec<SnapshotInfo>> {
+pub fn list_snapshots(source: &VolumeRef, backend: &'static str) -> Result<Vec<SnapshotInfo>> {
     let volume_path = format!(
         "{}\\",
         source.id.trim_end_matches('\\').trim_end_matches('/')
@@ -308,9 +310,9 @@ fn find_device_path(output: &str) -> Option<String> {
 
 fn matches_volume(original: &Option<String>, target: &str) -> bool {
     match original {
-        Some(vol) => vol.trim_end_matches('\\').eq_ignore_ascii_case(
-            target.trim_end_matches('\\'),
-        ),
+        Some(vol) => vol
+            .trim_end_matches('\\')
+            .eq_ignore_ascii_case(target.trim_end_matches('\\')),
         None => false,
     }
 }
@@ -323,7 +325,10 @@ mod tests {
     fn extract_guid_from_indented_line() {
         let line = "   Shadow Copy ID: {12345678-abcd-ef01-1122-334455667788}";
         let guid = extract_guid(line);
-        assert_eq!(guid.as_deref(), Some("{12345678-abcd-ef01-1122-334455667788}"));
+        assert_eq!(
+            guid.as_deref(),
+            Some("{12345678-abcd-ef01-1122-334455667788}")
+        );
     }
 
     #[test]
@@ -339,7 +344,10 @@ mod tests {
     #[test]
     fn parse_wmic_field_extracts_value() {
         let output = "ReturnValue = 0;\nShadowID = {ABC-123};\n";
-        assert_eq!(parse_wmic_field(output, "ShadowID"), Some("{ABC-123}".to_string()));
+        assert_eq!(
+            parse_wmic_field(output, "ShadowID"),
+            Some("{ABC-123}".to_string())
+        );
     }
 
     #[test]
@@ -373,7 +381,10 @@ Shadow Copy ID: {aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}
 "#;
         let snapshots = parse_vssadmin_list_output(output, "C:\\", "windows-vss");
         assert_eq!(snapshots.len(), 1);
-        assert_eq!(snapshots[0].handle.id, "{11111111-2222-3333-4444-555555555555}");
+        assert_eq!(
+            snapshots[0].handle.id,
+            "{11111111-2222-3333-4444-555555555555}"
+        );
     }
 
     #[test]
@@ -387,7 +398,8 @@ Shadow Copy ID: {aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}
 
     #[test]
     fn find_device_path_extracts_globalroot_path() {
-        let output = "   Shadow Copy Volume: \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\n";
+        let output =
+            "   Shadow Copy Volume: \\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy1\n";
         assert_eq!(
             find_device_path(output),
             Some(r"\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1".to_string())

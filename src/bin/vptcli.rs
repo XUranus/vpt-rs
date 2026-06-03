@@ -78,9 +78,7 @@ fn resolve_backend(provider: Option<&str>) -> vpt_rs::Result<platform::CurrentBa
                 return Ok(backend);
             }
             return Err(vpt_rs::Error::InvalidArgument {
-                message: format!(
-                    "provider selection is not supported on this platform: `{name}`"
-                ),
+                message: format!("provider selection is not supported on this platform: `{name}`"),
             });
         }
         Ok(platform::current_backend())
@@ -109,13 +107,19 @@ fn parse_block_size(value: &str) -> vpt_rs::Result<usize> {
         _ => (value, 1),
     };
 
-    let num: usize = num_str.parse().map_err(|_| vpt_rs::Error::InvalidArgument {
-        message: format!("invalid block size `{value}`; expected a number with optional K/M/G suffix"),
-    })?;
+    let num: usize = num_str
+        .parse()
+        .map_err(|_| vpt_rs::Error::InvalidArgument {
+            message: format!(
+                "invalid block size `{value}`; expected a number with optional K/M/G suffix"
+            ),
+        })?;
 
-    let size = num.checked_mul(multiplier).ok_or_else(|| vpt_rs::Error::InvalidArgument {
-        message: format!("block size `{value}` overflows"),
-    })?;
+    let size = num
+        .checked_mul(multiplier)
+        .ok_or_else(|| vpt_rs::Error::InvalidArgument {
+            message: format!("block size `{value}` overflows"),
+        })?;
     if size == 0 {
         return Err(vpt_rs::Error::InvalidArgument {
             message: "block size must be greater than zero".to_string(),
@@ -200,10 +204,8 @@ fn snapshot_list(args: Vec<String>) -> vpt_rs::Result<()> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--provider" => {
-                let value = iter.next().ok_or_else(|| {
-                    vpt_rs::Error::InvalidArgument {
-                        message: "missing value after `--provider`".to_string(),
-                    }
+                let value = iter.next().ok_or_else(|| vpt_rs::Error::InvalidArgument {
+                    message: "missing value after `--provider`".to_string(),
                 })?;
                 provider = Some(value);
             }
@@ -223,7 +225,12 @@ fn snapshot_list(args: Vec<String>) -> vpt_rs::Result<()> {
     let backend = resolve_backend(provider.as_deref())?;
     let snapshots = backend.list_snapshots(&VolumeRef::new(volume))?;
     for snapshot in snapshots {
-        let source_display = snapshot.handle.source.as_ref().map(|s| s.id.as_str()).unwrap_or("-");
+        let source_display = snapshot
+            .handle
+            .source
+            .as_ref()
+            .map(|s| s.id.as_str())
+            .unwrap_or("-");
         println!(
             "{} {} {}",
             snapshot.handle.id, source_display, snapshot.backend
@@ -240,10 +247,8 @@ fn snapshot_delete(args: Vec<String>) -> vpt_rs::Result<()> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--provider" => {
-                let value = iter.next().ok_or_else(|| {
-                    vpt_rs::Error::InvalidArgument {
-                        message: "missing value after `--provider`".to_string(),
-                    }
+                let value = iter.next().ok_or_else(|| vpt_rs::Error::InvalidArgument {
+                    message: "missing value after `--provider`".to_string(),
                 })?;
                 provider = Some(value);
             }
@@ -279,25 +284,19 @@ fn parse_create_request(args: Vec<String>) -> vpt_rs::Result<(Option<String>, Sn
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--provider" => {
-                provider = Some(iter.next().ok_or_else(|| {
-                    vpt_rs::Error::InvalidArgument {
-                        message: "missing value after `--provider`".to_string(),
-                    }
+                provider = Some(iter.next().ok_or_else(|| vpt_rs::Error::InvalidArgument {
+                    message: "missing value after `--provider`".to_string(),
                 })?);
             }
             "--kind" => {
-                let value = iter.next().ok_or_else(|| {
-                    vpt_rs::Error::InvalidArgument {
-                        message: "missing value after `--kind`".to_string(),
-                    }
+                let value = iter.next().ok_or_else(|| vpt_rs::Error::InvalidArgument {
+                    message: "missing value after `--kind`".to_string(),
                 })?;
                 kind = value.parse()?;
             }
             "--label" => {
-                label = Some(iter.next().ok_or_else(|| {
-                    vpt_rs::Error::InvalidArgument {
-                        message: "missing value after `--label`".to_string(),
-                    }
+                label = Some(iter.next().ok_or_else(|| vpt_rs::Error::InvalidArgument {
+                    message: "missing value after `--label`".to_string(),
                 })?);
             }
             "--read-write" => {
@@ -336,10 +335,8 @@ fn parse_provider_flag(args: Vec<String>) -> vpt_rs::Result<Option<String>> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--provider" => {
-                provider = Some(iter.next().ok_or_else(|| {
-                    vpt_rs::Error::InvalidArgument {
-                        message: "missing value after `--provider`".to_string(),
-                    }
+                provider = Some(iter.next().ok_or_else(|| vpt_rs::Error::InvalidArgument {
+                    message: "missing value after `--provider`".to_string(),
                 })?);
             }
             _ => {
@@ -404,7 +401,11 @@ struct BackupRequest {
 }
 
 fn run_backup(args: Vec<String>) -> vpt_rs::Result<()> {
-    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h" || a == "help") {
+    if args.is_empty()
+        || args
+            .iter()
+            .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
         print_backup_usage();
         return Ok(());
     }
@@ -456,9 +457,7 @@ fn parse_backup_request(args: Vec<String>) -> vpt_rs::Result<BackupRequest> {
                 ));
             }
             "--snapshot-label" => {
-                snapshot_label = Some(
-                    iter.next().ok_or_else(|| missing("--snapshot-label"))?,
-                );
+                snapshot_label = Some(iter.next().ok_or_else(|| missing("--snapshot-label"))?);
             }
             "--snapshot-kind" => {
                 let value = iter.next().ok_or_else(|| missing("--snapshot-kind"))?;
@@ -532,7 +531,11 @@ struct RestoreRequest {
 }
 
 fn run_restore(args: Vec<String>) -> vpt_rs::Result<()> {
-    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h" || a == "help") {
+    if args.is_empty()
+        || args
+            .iter()
+            .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
         print_restore_usage();
         return Ok(());
     }

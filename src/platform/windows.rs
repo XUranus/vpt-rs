@@ -83,7 +83,10 @@ impl SnapshotProvider for WindowsBackend {
         })
     }
 
-    fn delete_snapshot(&self, _snapshot: &crate::types::SnapshotHandle) -> crate::error::Result<()> {
+    fn delete_snapshot(
+        &self,
+        _snapshot: &crate::types::SnapshotHandle,
+    ) -> crate::error::Result<()> {
         Err(crate::error::Error::UnsupportedOperation {
             operation: "delete_snapshot",
             backend: self.backend_name(),
@@ -153,7 +156,9 @@ impl crate::backup::BlockDeviceCopier for WindowsBackend {
                                             Some(info.handle.id),
                                         )
                                     } else {
-                                        info!("VSS snapshot created but has empty device path, falling back to direct copy");
+                                        info!(
+                                            "VSS snapshot created but has empty device path, falling back to direct copy"
+                                        );
                                         (
                                             std::path::PathBuf::from(volume_path_for_device(
                                                 &volume.id,
@@ -163,7 +168,9 @@ impl crate::backup::BlockDeviceCopier for WindowsBackend {
                                     }
                                 }
                                 Ok(_) => {
-                                    info!("VSS snapshot created but has no device path, falling back to direct copy");
+                                    info!(
+                                        "VSS snapshot created but has no device path, falling back to direct copy"
+                                    );
                                     (
                                         std::path::PathBuf::from(volume_path_for_device(
                                             &volume.id,
@@ -388,21 +395,31 @@ mod tests {
     #[test]
     fn backend_has_expected_capabilities() {
         let backend = WindowsBackend::new();
-        assert!(backend
-            .capabilities()
-            .contains(&Capability::CrashConsistentSnapshot));
-        assert!(backend
-            .capabilities()
-            .contains(&Capability::ApplicationConsistentSnapshot));
-        assert!(backend
-            .capabilities()
-            .contains(&Capability::BlockLevelBackup));
-        assert!(backend
-            .capabilities()
-            .contains(&Capability::BlockLevelRestore));
-        assert!(backend
-            .capabilities()
-            .contains(&Capability::DirectDeviceAccess));
+        assert!(
+            backend
+                .capabilities()
+                .contains(&Capability::CrashConsistentSnapshot)
+        );
+        assert!(
+            backend
+                .capabilities()
+                .contains(&Capability::ApplicationConsistentSnapshot)
+        );
+        assert!(
+            backend
+                .capabilities()
+                .contains(&Capability::BlockLevelBackup)
+        );
+        assert!(
+            backend
+                .capabilities()
+                .contains(&Capability::BlockLevelRestore)
+        );
+        assert!(
+            backend
+                .capabilities()
+                .contains(&Capability::DirectDeviceAccess)
+        );
     }
 
     #[cfg(feature = "windows-vss")]
