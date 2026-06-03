@@ -5,7 +5,7 @@
 
 use std::ffi::c_void;
 use std::ptr;
-use std::sync::Once;
+use std::sync::OnceLock;
 
 use tracing::{debug, info, warn, error};
 
@@ -271,15 +271,11 @@ unsafe extern "system" {
 
 // ── COM initialization (once) ──────────────────────────────────────────────
 
-static COM_INIT: Once = Once::new();
-static mut COM_INIT_OK: bool = false;
+static COM_INIT_RESULT: OnceLock<std::result::Result<(), Error>> = OnceLock::new();
 
 fn ensure_com_initialized() -> Result<()> {
-    let mut init_result = Err(Error::Message {
-        message: "COM initialization not attempted".to_string(),
-    });
-    COM_INIT.call_once(|| {
-        init_result = (|| -> Result<()> {
+    let result = COM_INIT_RESULT.get_or_init(|| {
+        (|| -> Result<()> {
             unsafe {
                 // CoInitializeEx
                 let hr_init = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -308,21 +304,16 @@ fn ensure_com_initialized() -> Result<()> {
                     });
                 }
 
-                COM_INIT_OK = true;
                 Ok(())
             }
-        })();
+        })()
     });
 
-    if unsafe { COM_INIT_OK } {
-        Ok(())
-    } else {
-        match init_result {
-            Ok(()) => Err(Error::Message {
-                message: "COM init race condition".to_string(),
-            }),
-            Err(e) => Err(e),
-        }
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => Err(Error::Message {
+            message: format!("COM initialization failed: {}", e),
+        }),
     }
 }
 
@@ -843,4 +834,72 @@ fn vss_free_snapshot_properties(props: *mut VssSnapshotProp) {
         unsafe { free_fn(props) };
     }
     unsafe { FreeLibrary(handle) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_guid_roundtrip() {
+        let s = "{12345678-ABCD-EF01-1122-334455667788}";
+        let id = parse_guid(s).unwrap();
+        assert_eq!(id.to_guid_string(), s);
+    }
+
+    #[test]
+    fn parse_guid_without_braces() {
+        let s = "12345678-ABCD-EF01-1122-334455667788";
+        let id = parse_guid(s).unwrap();
+        assert_eq!(id.data1, 0x12345678);
+        assert_eq!(id.data2, 0xABCD);
+        assert_eq!(id.data3, 0xEF01);
+    }
+
+    #[test]
+    fn parse_guid_rejects_invalid_format() {
+        assert!(parse_guid("not-a-guid").is_err());
+        assert!(parse_guid("{1234-5678}").is_err());
+        assert!(parse_guid("").is_err());
+    }
+
+    #[test]
+    fn normalize_volume_path_drive_letter() {
+        assert_eq!(normalize_volume_path("C:"), "C:\\");
+        assert_eq!(normalize_volume_path("C:\\"), "C:\\");
+        assert_eq!(normalize_volume_path("D:"), "D:\\");
+    }
+
+    #[test]
+    fn normalize_volume_path_guid_passthrough() {
+        let guid = r"\\?\Volume{12345678-abcd-ef01-1122-334455667788}\";
+        assert_eq!(normalize_volume_path(guid), guid);
+    }
+
+    #[test]
+    fn wide_string_produces_null_terminated_utf16() {
+        let w = wide_string("Hi");
+        assert_eq!(w, vec![72, 105, 0]); // 'H', 'i', NUL
+    }
+
+    #[test]
+    fn from_wide_ptr_null_returns_empty() {
+        assert_eq!(from_wide_ptr(ptr::null()), "");
+    }
+
+    #[test]
+    fn from_wide_ptr_reads_utf16() {
+        // "AB" in UTF-16: 0x0041, 0x0042
+        let data: Vec<u16> = vec![0x0041, 0x0042, 0x0000];
+        assert_eq!(from_wide_ptr(data.as_ptr()), "AB");
+    }
+
+    #[test]
+    fn vss_id_zero_is_all_zeros() {
+        let id = VssId::ZERO;
+        assert_eq!(id.data1, 0);
+        assert_eq!(id.data2, 0);
+        assert_eq!(id.data3, 0);
+        assert_eq!(id.data4, [0; 8]);
+    }
 }

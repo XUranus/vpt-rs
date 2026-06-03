@@ -314,3 +314,88 @@ fn matches_volume(original: &Option<String>, target: &str) -> bool {
         None => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_guid_from_indented_line() {
+        let line = "   Shadow Copy ID: {12345678-abcd-ef01-1122-334455667788}";
+        let guid = extract_guid(line);
+        assert_eq!(guid.as_deref(), Some("{12345678-abcd-ef01-1122-334455667788}"));
+    }
+
+    #[test]
+    fn extract_guid_returns_none_for_no_braces() {
+        assert_eq!(extract_guid("no guid here"), None);
+    }
+
+    #[test]
+    fn extract_guid_returns_none_for_wrong_segment_count() {
+        assert_eq!(extract_guid("{1234-5678}"), None);
+    }
+
+    #[test]
+    fn parse_wmic_field_extracts_value() {
+        let output = "ReturnValue = 0;\nShadowID = {ABC-123};\n";
+        assert_eq!(parse_wmic_field(output, "ShadowID"), Some("{ABC-123}".to_string()));
+    }
+
+    #[test]
+    fn parse_wmic_field_returns_none_for_missing_field() {
+        let output = "ReturnValue = 0;\n";
+        assert_eq!(parse_wmic_field(output, "ShadowID"), None);
+    }
+
+    #[test]
+    fn matches_volume_case_insensitive() {
+        assert!(matches_volume(&Some("C:\\".to_string()), "c:"));
+        assert!(matches_volume(&Some("D:".to_string()), "D:\\"));
+        assert!(!matches_volume(&Some("C:".to_string()), "D:"));
+        assert!(!matches_volume(&None, "C:"));
+    }
+
+    #[test]
+    fn parse_vssadmin_list_output_parses_snapshots() {
+        let output = r#"Shadow Copy ID: {11111111-2222-3333-4444-555555555555}
+   Original Volume: (C:)\\?\Volume{66666666-7777-8888-9999-aaaaaaaaaaaa}\
+   Shadow Copy Volume: \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1
+   Originating Machine: DESKTOP
+   Service Machine: DESKTOP
+   Provider: Microsoft Software Shadow Copy provider 1.0
+   Type: ClientAccessible
+   Attributes: Auto_release
+
+Shadow Copy ID: {aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}
+   Original Volume: (D:)\\?\Volume{ffffffff-1111-2222-3333-444444444444}\
+   Shadow Copy Volume: \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy2
+"#;
+        let snapshots = parse_vssadmin_list_output(output, "C:\\", "windows-vss");
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].handle.id, "{11111111-2222-3333-4444-555555555555}");
+    }
+
+    #[test]
+    fn parse_vssadmin_list_output_returns_empty_for_no_match() {
+        let output = r#"Shadow Copy ID: {11111111-2222-3333-4444-555555555555}
+   Original Volume: (D:)\\?\Volume{66666666-7777-8888-9999-aaaaaaaaaaaa}\
+"#;
+        let snapshots = parse_vssadmin_list_output(output, "C:\\", "windows-vss");
+        assert_eq!(snapshots.len(), 0);
+    }
+
+    #[test]
+    fn find_device_path_extracts_globalroot_path() {
+        let output = "   Shadow Copy Volume: \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\n";
+        assert_eq!(
+            find_device_path(output),
+            Some(r"\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1".to_string())
+        );
+    }
+
+    #[test]
+    fn find_device_path_returns_none_for_empty() {
+        assert_eq!(find_device_path("no device path here"), None);
+    }
+}

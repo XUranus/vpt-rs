@@ -9,10 +9,31 @@ pub mod com;
 
 use tracing::{info, warn};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::types::{SnapshotInfo, VolumeRef};
 
 use super::BACKEND_NAME;
+
+/// Validate that a string looks like a VSS snapshot GUID (e.g. `{12345678-ABCD-EF01-1122-334455667788}`).
+/// Prevents command injection when passing IDs to wmic/vssadmin.
+fn validate_snapshot_id(id: &str) -> Result<()> {
+    let trimmed = id.trim();
+    if trimmed.starts_with('{')
+        && trimmed.ends_with('}')
+        && trimmed[1..trimmed.len() - 1]
+            .split('-')
+            .count() == 5
+        && trimmed[1..trimmed.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == '-')
+    {
+        Ok(())
+    } else {
+        Err(Error::InvalidArgument {
+            message: format!("invalid snapshot ID format (expected GUID like '{{12345678-ABCD-EF01-1122-334455667788}}'): `{id}`"),
+        })
+    }
+}
 
 /// Snapshot set result shared between COM and CLI backends.
 #[derive(Debug, Clone)]
@@ -59,6 +80,7 @@ pub fn abort_snapshot_set(_raw: &mut RawSnapshotSet) -> Result<()> {
 
 /// Delete a VSS snapshot.  Tries COM coordinator first, falls back to wmic/vssadmin.
 pub fn delete_snapshot(snapshot_id: &str) -> Result<()> {
+    validate_snapshot_id(snapshot_id)?;
     match com::delete_snapshot(snapshot_id) {
         Ok(()) => return Ok(()),
         Err(e) => {
@@ -75,5 +97,6 @@ pub fn list_snapshots(source: &VolumeRef, backend: &'static str) -> Result<Vec<S
 
 /// Get the device path for a VSS snapshot.
 pub fn get_snapshot_device_path(snapshot_id: &str) -> Result<String> {
+    validate_snapshot_id(snapshot_id)?;
     cli::get_snapshot_device_path(snapshot_id)
 }

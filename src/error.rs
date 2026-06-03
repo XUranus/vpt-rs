@@ -21,8 +21,8 @@ pub enum Error {
     #[error("path does not exist: {path}")]
     MissingPath { path: PathBuf },
 
-    #[error("io error: {message}")]
-    Io { message: String },
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 
     #[error("invalid argument: {message}")]
     InvalidArgument { message: String },
@@ -43,14 +43,6 @@ pub enum Error {
 
     #[error("{message}")]
     Message { message: String },
-}
-
-impl From<std::io::Error> for Error {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io {
-            message: error.to_string(),
-        }
-    }
 }
 
 impl Error {
