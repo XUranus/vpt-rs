@@ -227,7 +227,7 @@ fn parse_vssadmin_list_output(
                         snapshots.push(SnapshotInfo {
                             handle: SnapshotHandle {
                                 id: prev_id,
-                                source: VolumeRef::new(volume_path),
+                                source: Some(VolumeRef::new(volume_path)),
                             },
                             backend,
                             path_hint: current_device.as_ref().map(PathBuf::from),

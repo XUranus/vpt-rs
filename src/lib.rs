@@ -28,9 +28,9 @@ pub use platform::BackendDescriptor;
 pub use restore::RestorePlanner;
 pub use snapshot::SnapshotProvider;
 pub use types::{
-    BackupPlan, BackupSource, BackupTarget, Capability, MountHandle, MountMode, MountRequest,
-    RestorePlan, SnapshotHandle, SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRef,
-    SnapshotRequest, VolumeRef,
+    sanitize_snapshot_label, BackupPlan, BackupSource, BackupTarget, Capability, MountHandle,
+    MountMode, MountRequest, RestorePlan, SnapshotHandle, SnapshotInfo, SnapshotKind,
+    SnapshotPolicy, SnapshotRef, SnapshotRequest, VolumeRef,
 };
 
 #[cfg(test)]

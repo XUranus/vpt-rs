@@ -763,7 +763,7 @@ pub fn list_snapshots(
                     snapshots.push(SnapshotInfo {
                         handle: SnapshotHandle {
                             id: guid_to_string(&prop.snapshot.snapshot_id),
-                            source: VolumeRef::new(&volume_path),
+                            source: Some(VolumeRef::new(&volume_path)),
                         },
                         backend,
                         path_hint,

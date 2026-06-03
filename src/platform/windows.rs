@@ -8,7 +8,6 @@ use crate::types::Capability;
 const CAPABILITIES: &[Capability] = &[
     Capability::CrashConsistentSnapshot,
     Capability::ApplicationConsistentSnapshot,
-    Capability::ReadOnlySnapshotMount,
     Capability::BlockLevelBackup,
     Capability::BlockLevelRestore,
     Capability::DirectDeviceAccess,

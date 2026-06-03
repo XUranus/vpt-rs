@@ -10,14 +10,13 @@ use crate::process::{self, CommandIo};
 use crate::restore::RestorePlanner;
 use crate::snapshot::SnapshotProvider;
 use crate::types::{
-    BackupPlan, BackupSource, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle,
-    SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRef, SnapshotRequest, VolumeRef,
+    sanitize_snapshot_label, BackupPlan, BackupSource, Capability, MountHandle, MountRequest,
+    RestorePlan, SnapshotHandle, SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRef,
+    SnapshotRequest, VolumeRef,
 };
 
 const CAPABILITIES: &[Capability] = &[
     Capability::CrashConsistentSnapshot,
-    Capability::ReadOnlySnapshotMount,
-    Capability::WritableSnapshotMount,
     Capability::BlockLevelBackup,
     Capability::BlockLevelRestore,
     Capability::IncrementalSend,
@@ -322,12 +321,19 @@ impl BtrfsBackend {
             },
         );
 
-        if let Some(snapshot_plan) = &plan.temporary_snapshot {
-            let _ = self.run_command(&BtrfsCommand::new(vec![
+        if let Some(snapshot_plan) = &plan.temporary_snapshot
+            && let Err(cleanup_err) = self.run_command(&BtrfsCommand::new(vec![
                 "subvolume".to_string(),
                 "delete".to_string(),
                 snapshot_plan.snapshot_path.display().to_string(),
-            ]));
+            ]))
+        {
+            tracing::warn!(
+                backend = self.backend_name(),
+                snapshot = %snapshot_plan.snapshot_path.display(),
+                error = %cleanup_err,
+                "failed to clean up temporary snapshot"
+            );
         }
 
         result.map(|_| ())
@@ -370,7 +376,7 @@ impl BtrfsBackend {
             snapshots.push(SnapshotInfo {
                 handle: SnapshotHandle {
                     id: path_hint.display().to_string(),
-                    source: source.clone(),
+                    source: Some(source.clone()),
                 },
                 backend: self.backend_name(),
                 path_hint: Some(path_hint),
@@ -403,7 +409,7 @@ impl SnapshotProvider for BtrfsBackend {
             Ok(SnapshotInfo {
                 handle: SnapshotHandle {
                     id: plan.snapshot_path.display().to_string(),
-                    source: request.source.clone(),
+                    source: Some(request.source.clone()),
                 },
                 backend: self.backend_name(),
                 path_hint: Some(plan.snapshot_path),
@@ -516,19 +522,7 @@ impl MountManager for BtrfsBackend {
 }
 
 fn sanitize_label(label: &str) -> String {
-    let sanitized: String = label
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
-            _ => '-',
-        })
-        .collect();
-
-    if sanitized.trim_matches('-').is_empty() {
-        "snapshot".to_string()
-    } else {
-        sanitized
-    }
+    sanitize_snapshot_label(label)
 }
 
 fn default_snapshot_name(source: &Path) -> String {

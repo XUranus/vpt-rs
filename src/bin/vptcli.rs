@@ -171,7 +171,9 @@ fn run_snapshot(args: Vec<String>) -> vpt_rs::Result<()> {
             let backend = resolve_backend(provider.as_deref())?;
             let snapshot = backend.create_snapshot(&request)?;
             println!("snapshot: {}", snapshot.handle.id);
-            println!("source: {}", snapshot.handle.source);
+            if let Some(source) = &snapshot.handle.source {
+                println!("source: {}", source);
+            }
             println!("backend: {}", snapshot.backend);
             if let Some(path_hint) = snapshot.path_hint {
                 println!("path: {}", path_hint.display());
@@ -221,9 +223,10 @@ fn snapshot_list(args: Vec<String>) -> vpt_rs::Result<()> {
     let backend = resolve_backend(provider.as_deref())?;
     let snapshots = backend.list_snapshots(&VolumeRef::new(volume))?;
     for snapshot in snapshots {
+        let source_display = snapshot.handle.source.as_ref().map(|s| s.id.as_str()).unwrap_or("-");
         println!(
             "{} {} {}",
-            snapshot.handle.id, snapshot.handle.source, snapshot.backend
+            snapshot.handle.id, source_display, snapshot.backend
         );
     }
     Ok(())
@@ -260,7 +263,7 @@ fn snapshot_delete(args: Vec<String>) -> vpt_rs::Result<()> {
     let backend = resolve_backend(provider.as_deref())?;
     backend.delete_snapshot(&vpt_rs::SnapshotHandle {
         id: snapshot_id,
-        source: VolumeRef::new("unknown"),
+        source: None,
     })?;
     Ok(())
 }
@@ -401,7 +404,7 @@ struct BackupRequest {
 }
 
 fn run_backup(args: Vec<String>) -> vpt_rs::Result<()> {
-    if args.is_empty() {
+    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h" || a == "help") {
         print_backup_usage();
         return Ok(());
     }
@@ -471,10 +474,6 @@ fn parse_backup_request(args: Vec<String>) -> vpt_rs::Result<BackupRequest> {
             "--no-snapshot" => {
                 snapshot_enabled = false;
             }
-            "--help" | "-h" | "help" => {
-                print_backup_usage();
-                std::process::exit(0);
-            }
             value if source.is_none() => {
                 source = Some(VolumeRef::new(value));
             }
@@ -533,7 +532,7 @@ struct RestoreRequest {
 }
 
 fn run_restore(args: Vec<String>) -> vpt_rs::Result<()> {
-    if args.is_empty() {
+    if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h" || a == "help") {
         print_restore_usage();
         return Ok(());
     }
@@ -583,10 +582,6 @@ fn parse_restore_request(args: Vec<String>) -> vpt_rs::Result<RestoreRequest> {
             "--block-size" => {
                 let value = iter.next().ok_or_else(|| missing("--block-size"))?;
                 block_size = Some(parse_block_size(&value)?);
-            }
-            "--help" | "-h" | "help" => {
-                print_restore_usage();
-                std::process::exit(0);
             }
             value if destination.is_none() => {
                 destination = Some(VolumeRef::new(value));

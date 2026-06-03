@@ -43,7 +43,7 @@ impl VssSession {
         Ok(SnapshotInfo {
             handle: SnapshotHandle {
                 id: self.raw.snapshot_id.clone(),
-                source: self.spec.request.source,
+                source: Some(self.spec.request.source),
             },
             backend: BACKEND_NAME,
             path_hint,

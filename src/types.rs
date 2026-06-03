@@ -1,5 +1,25 @@
 use std::path::PathBuf;
 
+/// Sanitize a user-provided label into a safe snapshot name component.
+///
+/// Replaces characters outside `[a-zA-Z0-9\-_.+:]` with `-`.
+/// Returns `"snapshot"` if the result would be empty or all dashes.
+pub fn sanitize_snapshot_label(label: &str) -> String {
+    let sanitized: String = label
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '+' | ':' => ch,
+            _ => '-',
+        })
+        .collect();
+
+    if sanitized.trim_matches('-').is_empty() {
+        "snapshot".to_string()
+    } else {
+        sanitized
+    }
+}
+
 /// Stable identifier for a live volume, filesystem, dataset, or provider-specific source.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VolumeRef {
@@ -114,7 +134,7 @@ pub struct SnapshotRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotHandle {
     pub id: String,
-    pub source: VolumeRef,
+    pub source: Option<VolumeRef>,
 }
 
 /// Reference to an existing snapshot used by backup/restore planning.

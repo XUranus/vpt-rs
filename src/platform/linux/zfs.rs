@@ -11,13 +11,13 @@ use crate::process::{self, CommandIo};
 use crate::restore::RestorePlanner;
 use crate::snapshot::SnapshotProvider;
 use crate::types::{
-    BackupPlan, BackupSource, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle,
-    SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRequest, VolumeRef,
+    sanitize_snapshot_label, BackupPlan, BackupSource, Capability, MountHandle, MountRequest,
+    RestorePlan, SnapshotHandle, SnapshotInfo, SnapshotKind, SnapshotPolicy, SnapshotRequest,
+    VolumeRef,
 };
 
 const CAPABILITIES: &[Capability] = &[
     Capability::CrashConsistentSnapshot,
-    Capability::ReadOnlySnapshotMount,
     Capability::BlockLevelBackup,
     Capability::BlockLevelRestore,
     Capability::IncrementalSend,
@@ -374,7 +374,7 @@ impl ZfsBackend {
             snapshots.push(SnapshotInfo {
                 handle: SnapshotHandle {
                     id: name.to_string(),
-                    source: VolumeRef::new(dataset.name.clone()),
+                    source: Some(VolumeRef::new(dataset.name.clone())),
                 },
                 backend: self.backend_name(),
                 path_hint,
@@ -404,7 +404,7 @@ impl SnapshotProvider for ZfsBackend {
             Ok(SnapshotInfo {
                 handle: SnapshotHandle {
                     id: plan.snapshot_id,
-                    source: request.source.clone(),
+                    source: Some(request.source.clone()),
                 },
                 backend: self.backend_name(),
                 path_hint: plan.dataset.mount_point,
@@ -483,13 +483,20 @@ impl BlockDeviceCopier for ZfsBackend {
             )?;
             Ok(())
         })();
-        if let Some(snapshot_plan) = &send_plan.temporary_snapshot {
-            let _ = self.run_command(
+        if let Some(snapshot_plan) = &send_plan.temporary_snapshot
+            && let Err(cleanup_err) = self.run_command(
                 "delete_snapshot",
                 &ZfsCommand::new(vec![
                     "destroy".to_string(),
                     snapshot_plan.snapshot_id.clone(),
                 ]),
+            )
+        {
+            tracing::warn!(
+                backend = self.backend_name(),
+                snapshot = %snapshot_plan.snapshot_id,
+                error = %cleanup_err,
+                "failed to clean up temporary snapshot"
             );
         }
         if let Err(error) = &result {
@@ -573,19 +580,7 @@ fn derive_snapshot_name(label: Option<&str>) -> String {
 }
 
 fn sanitize_snapshot_segment(value: &str) -> String {
-    let sanitized: String = value
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | ':' => ch,
-            _ => '-',
-        })
-        .collect();
-
-    if sanitized.trim_matches('-').is_empty() {
-        "snapshot".to_string()
-    } else {
-        sanitized
-    }
+    sanitize_snapshot_label(value)
 }
 
 #[cfg(test)]

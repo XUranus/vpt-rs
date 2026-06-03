@@ -184,7 +184,6 @@ impl SnapshotProvider for VssSnapshotProvider {
         &[
             Capability::CrashConsistentSnapshot,
             Capability::ApplicationConsistentSnapshot,
-            Capability::ReadOnlySnapshotMount,
             Capability::BlockLevelBackup,
             Capability::BlockLevelRestore,
             Capability::DirectDeviceAccess,

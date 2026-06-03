@@ -11,14 +11,12 @@ use crate::process::{self, CommandIo};
 use crate::restore::RestorePlanner;
 use crate::snapshot::SnapshotProvider;
 use crate::types::{
-    BackupPlan, Capability, MountHandle, MountRequest, RestorePlan, SnapshotHandle, SnapshotInfo,
-    SnapshotKind, SnapshotRequest, VolumeRef,
+    sanitize_snapshot_label, BackupPlan, Capability, MountHandle, MountRequest, RestorePlan,
+    SnapshotHandle, SnapshotInfo, SnapshotKind, SnapshotRequest, VolumeRef,
 };
 
 const CAPABILITIES: &[Capability] = &[
     Capability::CrashConsistentSnapshot,
-    Capability::ReadOnlySnapshotMount,
-    Capability::WritableSnapshotMount,
     Capability::BlockLevelBackup,
     Capability::BlockLevelRestore,
     Capability::DirectDeviceAccess,
@@ -326,7 +324,7 @@ impl LvmBackend {
             snapshots.push(SnapshotInfo {
                 handle: SnapshotHandle {
                     id: path.display().to_string(),
-                    source: VolumeRef::new(source.lv_path.display().to_string()),
+                    source: Some(VolumeRef::new(source.lv_path.display().to_string())),
                 },
                 backend: self.backend_name(),
                 path_hint: Some(path),
@@ -358,7 +356,7 @@ impl SnapshotProvider for LvmBackend {
             Ok(SnapshotInfo {
                 handle: SnapshotHandle {
                     id: plan.snapshot_path.display().to_string(),
-                    source: request.source.clone(),
+                    source: Some(request.source.clone()),
                 },
                 backend: self.backend_name(),
                 path_hint: Some(plan.snapshot_path),
@@ -519,19 +517,7 @@ fn derive_snapshot_name(lv_name: &str, label: Option<&str>) -> String {
 }
 
 fn sanitize_snapshot_segment(value: &str) -> String {
-    let sanitized: String = value
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '+' | '.' => ch,
-            _ => '-',
-        })
-        .collect();
-
-    if sanitized.trim_matches('-').is_empty() {
-        "snapshot".to_string()
-    } else {
-        sanitized
-    }
+    sanitize_snapshot_label(value)
 }
 
 #[cfg(test)]
