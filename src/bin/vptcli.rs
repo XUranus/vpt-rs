@@ -113,7 +113,9 @@ fn parse_block_size(value: &str) -> vpt_rs::Result<usize> {
         message: format!("invalid block size `{value}`; expected a number with optional K/M/G suffix"),
     })?;
 
-    let size = num * multiplier;
+    let size = num.checked_mul(multiplier).ok_or_else(|| vpt_rs::Error::InvalidArgument {
+        message: format!("block size `{value}` overflows"),
+    })?;
     if size == 0 {
         return Err(vpt_rs::Error::InvalidArgument {
             message: "block size must be greater than zero".to_string(),

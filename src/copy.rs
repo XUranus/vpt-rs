@@ -1,5 +1,5 @@
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::time::Instant;
 
@@ -22,12 +22,12 @@ pub fn copy_blocks(src: &Path, dst: &Path, block_size: usize) -> Result<u64> {
         });
     }
 
-    let src_file = File::open(src).map_err(|e| {
+    let mut src_file = File::open(src).map_err(|e| {
         error!(src = %src.display(), error = %e, "failed to open source");
         Error::from(e)
     })?;
 
-    let dst_file = OpenOptions::new()
+    let mut dst_file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(false)
@@ -36,9 +36,6 @@ pub fn copy_blocks(src: &Path, dst: &Path, block_size: usize) -> Result<u64> {
             error!(dst = %dst.display(), error = %e, "failed to open destination");
             Error::from(e)
         })?;
-
-    let mut reader = BufReader::with_capacity(block_size, src_file);
-    let mut writer = BufWriter::with_capacity(block_size, dst_file);
 
     let mut buffer = vec![0u8; block_size];
     let mut total_bytes: u64 = 0;
@@ -53,7 +50,7 @@ pub fn copy_blocks(src: &Path, dst: &Path, block_size: usize) -> Result<u64> {
     );
 
     loop {
-        let bytes_read = reader.read(&mut buffer).map_err(|e| {
+        let bytes_read = src_file.read(&mut buffer).map_err(|e| {
             error!(src = %src.display(), error = %e, "read failed during block copy");
             Error::from(e)
         })?;
@@ -62,7 +59,7 @@ pub fn copy_blocks(src: &Path, dst: &Path, block_size: usize) -> Result<u64> {
             break;
         }
 
-        writer.write_all(&buffer[..bytes_read]).map_err(|e| {
+        dst_file.write_all(&buffer[..bytes_read]).map_err(|e| {
             error!(dst = %dst.display(), error = %e, "write failed during block copy");
             Error::from(e)
         })?;
@@ -86,9 +83,9 @@ pub fn copy_blocks(src: &Path, dst: &Path, block_size: usize) -> Result<u64> {
         }
     }
 
-    writer.flush().map_err(Error::from)?;
+    dst_file.flush().map_err(Error::from)?;
 
-    writer.get_ref().sync_all().map_err(|e| {
+    dst_file.sync_all().map_err(|e| {
         error!(dst = %dst.display(), error = %e, "fsync failed after block copy");
         Error::from(e)
     })?;
@@ -137,7 +134,7 @@ mod tests {
         let src = dir.path().join("empty.bin");
         let dst = dir.path().join("dest.bin");
 
-        fs::write(&src, &[]).unwrap();
+        fs::write(&src, []).unwrap();
 
         let copied = copy_blocks(&src, &dst, 4096).unwrap();
         assert_eq!(copied, 0);

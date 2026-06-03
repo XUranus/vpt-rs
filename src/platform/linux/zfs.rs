@@ -204,10 +204,9 @@ impl ZfsBackend {
     }
 
     pub fn plan_backup(&self, plan: &BackupPlan) -> Result<ZfsSendPlan> {
-        let snapshot = match (&plan.source, &plan.snapshot_policy) {
-            (BackupSource::Snapshot(snapshot), _) => {
-                self.parse_snapshot_ref(&VolumeRef::new(snapshot.id.clone()))?
-            }
+        // For temporary snapshot policy, create the plan once and reuse it
+        // for both the send snapshot reference and the temporary_snapshot field.
+        let temporary_snapshot = match (&plan.source, &plan.snapshot_policy) {
             (
                 BackupSource::Volume(volume),
                 SnapshotPolicy::Temporary {
@@ -215,14 +214,24 @@ impl ZfsBackend {
                     label,
                     read_only,
                 },
-            ) => {
-                let snapshot_plan = self.plan_create_snapshot(&SnapshotRequest {
-                    source: volume.clone(),
-                    kind: *kind,
-                    label: label.clone(),
-                    read_only: *read_only,
-                })?;
-                self.parse_snapshot_ref(&VolumeRef::new(snapshot_plan.snapshot_id.clone()))?
+            ) => Some(self.plan_create_snapshot(&SnapshotRequest {
+                source: volume.clone(),
+                kind: *kind,
+                label: label.clone(),
+                read_only: *read_only,
+            })?),
+            _ => None,
+        };
+
+        let snapshot = match (&plan.source, &plan.snapshot_policy) {
+            (BackupSource::Snapshot(snapshot), _) => {
+                self.parse_snapshot_ref(&VolumeRef::new(snapshot.id.clone()))?
+            }
+            (BackupSource::Volume(_), SnapshotPolicy::Temporary { .. }) => {
+                // Reuse the already-created temporary snapshot plan
+                self.parse_snapshot_ref(&VolumeRef::new(
+                    temporary_snapshot.as_ref().unwrap().snapshot_id.clone(),
+                ))?
             }
             (BackupSource::Volume(volume), SnapshotPolicy::Disabled) => {
                 return Err(Error::InvalidArgument {
@@ -248,23 +257,6 @@ impl ZfsBackend {
         let parent_snapshot = match &plan.parent_snapshot {
             Some(snapshot) => Some(self.parse_snapshot_ref(&VolumeRef::new(snapshot.id.clone()))?),
             None => None,
-        };
-
-        let temporary_snapshot = match (&plan.source, &plan.snapshot_policy) {
-            (
-                BackupSource::Volume(volume),
-                SnapshotPolicy::Temporary {
-                    kind,
-                    label,
-                    read_only,
-                },
-            ) => Some(self.plan_create_snapshot(&SnapshotRequest {
-                source: volume.clone(),
-                kind: *kind,
-                label: label.clone(),
-                read_only: *read_only,
-            })?),
-            _ => None,
         };
 
         let mut args = vec!["send".to_string()];
@@ -471,11 +463,11 @@ impl BlockDeviceCopier for ZfsBackend {
             }
         };
 
-        if let Some(snapshot_plan) = &send_plan.temporary_snapshot {
-            if let Err(error) = self.run_command("create_snapshot", &snapshot_plan.command) {
-                error!(backend = self.backend_name(), source = %plan.source, error = %error, "backup_volume failed");
-                return Err(error);
-            }
+        if let Some(snapshot_plan) = &send_plan.temporary_snapshot
+            && let Err(error) = self.run_command("create_snapshot", &snapshot_plan.command)
+        {
+            error!(backend = self.backend_name(), source = %plan.source, error = %error, "backup_volume failed");
+            return Err(error);
         }
 
         let result = (|| {

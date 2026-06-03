@@ -309,7 +309,7 @@ impl LvmBackend {
                 continue;
             }
 
-            let lv_name = parts[0];
+            let _lv_name = parts[0];
             let origin = parts[1];
             let lv_path = parts[2];
             let lv_attr = parts[3];
@@ -332,8 +332,6 @@ impl LvmBackend {
                 path_hint: Some(path),
                 read_only: lv_attr.contains('r'),
             });
-
-            let _ = lv_name;
         }
 
         snapshots
