@@ -16,7 +16,7 @@ windows-vss = [
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-windows = { version = "0.62", optional = true }
+windows = { version = "0.61", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
