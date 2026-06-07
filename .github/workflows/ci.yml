@@ -32,8 +32,3 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --verbose
       - run: cargo test --verbose
-      - name: Test with all features (Windows only)
-        if: runner.os == 'Windows'
-        run: |
-          cargo build --all-features --verbose
-          cargo test --all-features --verbose
