@@ -1,41 +1,42 @@
-# Website
+# vpt-rs Documentation
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
-
-## Installation
-
-```bash
-yarn
-```
+This site is built using [Docusaurus](https://docusaurus.io/).
 
 ## Local Development
 
 ```bash
-yarn start
+cd docs
+npm install
+npm start
 ```
 
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
+Opens a local dev server at `http://localhost:3000/vpt-rs/`.
 
 ## Build
 
 ```bash
-yarn build
+cd docs
+npm run build
 ```
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
+Generates static files in `build/` for both English and Chinese locales.
 
 ## Deployment
 
-Using SSH:
+The site is automatically deployed to **https://xuranus.github.io/vpt-rs** via GitHub Actions when changes are pushed to `docs/` on the `master` branch.
 
-```bash
-USE_SSH=true yarn deploy
-```
+The workflow is defined in `.github/workflows/deploy-docs.yml`.
 
-Not using SSH:
+### Prerequisites
 
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
+GitHub Pages must be enabled in repository settings:
+1. Go to **Settings → Pages**
+2. Under **Source**, select **GitHub Actions**
+3. Save
 
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+## Languages
+
+- English (default)
+- 简体中文 (zh-Hans)
+
+Switch languages using the locale dropdown in the navbar.
