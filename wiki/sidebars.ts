@@ -64,6 +64,13 @@ const sidebars: SidebarsConfig = {
         'testing/integration-tests',
       ],
     },
+    {
+      type: 'category',
+      label: 'Contributing',
+      items: [
+        'contributing/coding-style',
+      ],
+    },
   ],
 };
 

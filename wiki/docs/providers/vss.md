@@ -1007,3 +1007,53 @@ The `wmic` tool is deprecated in newer Windows versions. The VSS provider's CLI 
 If `wmic` is removed in a future Windows release, the COM path will become the primary
 implementation.
 :::
+
+## VSS COM Debug Notes
+
+This section documents known issues with the COM API path. For the full technical analysis, see `TODO.md` in the project root.
+
+### Known COM Issues
+
+| # | Problem | Status |
+|---|---------|--------|
+| 1 | `CreateVssBackupComponents` not exported from `vssapi.dll` — must use `CreateVssBackupComponentsInternal` | ✅ Worked around via `GetProcAddress` |
+| 2 | Vtable layout mismatch — `InitializeForBackup` at index 12, not 20 (SDK header) | ⚠️ Empirically verified, fragile |
+| 3 | Post-init methods return `VSS_E_BAD_STATE` after successful `InitializeForBackup` | ❌ Blocks COM snapshot creation |
+| 4 | `IVssCoordinator` vtable also shifted — `DeleteSnapshots` at index 11 | ✅ Works for deletion |
+| 5 | `CVssBackupComponents` CLSID not registered — must use dynamic load | ✅ Worked around |
+
+### Vtable Layout (Empirically Tested)
+
+The vtable returned by `CreateVssBackupComponentsInternal` on Windows 10 Home build 19045:
+
+| Index | Function | Result |
+|-------|----------|--------|
+| 0-2 | IUnknown | N/A |
+| 3 | GetWriterMetadataCount | crash (write bad ptr) |
+| 4 | GetWriterMetadata | VSS_E_BAD_STATE |
+| 5 | FreeWriterMetadata | S_OK |
+| **12** | **InitializeForBackup** | **S_OK** ✅ |
+| 13 | Unknown | crash (read bad ptr) |
+| 15 | Unknown | VSS_E_BAD_STATE |
+| 18 | Unknown | VSS_E_BAD_STATE |
+| 20 | Unknown | E_INVALIDARG |
+
+:::danger
+The vtable offsets are empirically determined and may differ across Windows editions. The COM snapshot creation path (`create_snapshot` in `com.rs`) is currently non-functional because post-init methods fail with `VSS_E_BAD_STATE`. Use the CLI path (wmic/vssadmin) for snapshot creation.
+:::
+
+### Hypotheses for COM Failures
+
+1. **DLL version mismatch** — `vssapi.dll` on this system may have a different vtable layout than SDK headers target
+2. **Extended interface** — `CreateVssBackupComponentsInternal` may return `IVssBackupComponentsEx4` with extra methods inserted
+3. **COM apartment model** — `COINIT_APARTMENTTHREADED` might work where `COINIT_MULTITHREADED` fails
+4. **VSS writer state** — failed writers could cause `VSS_E_BAD_STATE`
+5. **Calling convention** — x64 should have one convention, but register state may differ
+
+### Future Analysis Paths
+
+- **Path A**: Compile C++ reference on target system, dump vtable addresses, compare
+- **Path B**: Use `windows_core::imp::define_interface!` macro for correct vtable generation
+- **Path C**: Use WMI `Win32_ShadowCopy` for ALL operations
+- **Path D**: Query `IVssBackupComponentsEx` via `QueryInterface`
+- **Path E**: Check VSS writer status (`vssadmin list writers`)
