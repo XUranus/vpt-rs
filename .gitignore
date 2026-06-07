@@ -1,3 +1,8 @@
 /target
 .codex
 __pycache__/
+
+# Docusaurus
+docs/node_modules/
+docs/build/
+docs/.docusaurus/
