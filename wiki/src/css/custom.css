@@ -1,0 +1,202 @@
+:root {
+  --ifm-color-primary: #e94560;
+  --ifm-color-primary-dark: #d43d56;
+  --ifm-color-primary-darker: #c93a52;
+  --ifm-color-primary-darkest: #a63043;
+  --ifm-color-primary-light: #eb5971;
+  --ifm-color-primary-lighter: #ed647a;
+  --ifm-color-primary-lightest: #f08495;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #f0657c;
+  --ifm-color-primary-dark: #ee4f69;
+  --ifm-color-primary-darker: #ed4460;
+  --ifm-color-primary-darkest: #e92547;
+  --ifm-color-primary-light: #f27b8f;
+  --ifm-color-primary-lighter: #f38698;
+  --ifm-color-primary-lightest: #f6a7b5;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+/* Interactive diagram styles */
+.architecture-diagram {
+  background: var(--ifm-card-background-color);
+  border-radius: 8px;
+  padding: 2rem;
+  margin: 1.5rem 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Animated flow diagrams */
+@keyframes flowPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.flow-arrow {
+  animation: flowPulse 2s ease-in-out infinite;
+}
+
+/* Interactive trait explorer */
+.trait-card {
+  border: 2px solid var(--ifm-color-primary);
+  border-radius: 8px;
+  padding: 1.2rem;
+  margin: 0.8rem 0;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.trait-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(233, 69, 96, 0.2);
+}
+
+.trait-card.expanded {
+  background: var(--ifm-card-background-color);
+}
+
+/* Backend comparison table */
+.backend-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.backend-table th {
+  background: var(--ifm-color-primary);
+  color: white;
+  padding: 0.6rem 1rem;
+  text-align: left;
+}
+
+.backend-table td {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--ifm-table-border-color);
+}
+
+.backend-table tr:hover td {
+  background: var(--ifm-table-row-hover-background);
+}
+
+/* Capability badges */
+.cap-badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin: 0.15rem;
+}
+
+.cap-badge.supported {
+  background: #d4edda;
+  color: #155724;
+}
+
+.cap-badge.unsupported {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+[data-theme='dark'] .cap-badge.supported {
+  background: #1e4d2b;
+  color: #a3d9a5;
+}
+
+[data-theme='dark'] .cap-badge.unsupported {
+  background: #4d1e1e;
+  color: #e6a3a3;
+}
+
+/* Code block enhancements */
+.code-block-title {
+  background: var(--ifm-color-primary);
+  color: white;
+  padding: 0.4rem 1rem;
+  border-radius: 8px 8px 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* Interactive flow chart node */
+.flow-node {
+  padding: 0.8rem 1.2rem;
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.flow-node.active {
+  border-left: 4px solid var(--ifm-color-primary);
+  background: var(--ifm-card-background-color);
+}
+
+/* Tabbed code examples */
+.code-tabs {
+  border: 1px solid var(--ifm-table-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.code-tabs-header {
+  display: flex;
+  background: var(--ifm-background-surface-color);
+  border-bottom: 1px solid var(--ifm-table-border-color);
+}
+
+.code-tab {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.code-tab.active {
+  border-bottom-color: var(--ifm-color-primary);
+  background: var(--ifm-card-background-color);
+}
+
+/* Step-by-step guides */
+.step {
+  display: flex;
+  gap: 1rem;
+  margin: 1.5rem 0;
+  align-items: flex-start;
+}
+
+.step-number {
+  background: var(--ifm-color-primary);
+  color: white;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.step-content {
+  flex: 1;
+}
+
+/* Mermaid diagram improvements */
+.mermaid {
+  text-align: center;
+  margin: 1.5rem 0;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Better code block spacing */
+pre {
+  margin: 1rem 0;
+}
