@@ -5,145 +5,262 @@ Restore a volume from a backup stream or image file created by `vptcli backup`.
 ## Usage
 
 ```
-vptcli restore <destination> --input <stream-file> [options]
+vptcli restore <destination-dir> --input <stream-file> [options]
+```
+
+Running `vptcli restore` with no arguments, or with `--help` / `-h`, prints the usage
+text. The help detection is at `src/bin/vptcli.rs:534-542`:
+
+```rust title="src/bin/vptcli.rs:534-542"
+fn run_restore(args: Vec<String>) -> vpt_rs::Result<()> {
+    if args.is_empty()
+        || args
+            .iter()
+            .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        print_restore_usage();
+        return Ok(());
+    }
+    // ...
+}
 ```
 
 ## Options
 
-| Flag               | Required | Default          | Description                                         |
-|--------------------|----------|------------------|-----------------------------------------------------|
-| `<destination>`    | **Yes**  | --               | Target volume or directory to restore into          |
-| `--input`          | **Yes**  | --               | Path to the backup image/stream file                |
-| `--provider`       | No       | Platform default | Backend provider name (Linux)                       |
-| `--force`          | No       | Off              | Allow destructive restore on block-level backends   |
-| `--base-snapshot`  | No       | None             | Base snapshot reference for incremental restore     |
-| `--block-size`     | No       | 4 MiB            | I/O block size for block-level copy                 |
+| Flag | Required | Default | Description |
+|---|---|---|---|
+| `<destination-dir>` | Yes | -- | Destination volume or directory path |
+| `--input <path>` | Yes | -- | Input image file path |
+| `--provider <name>` | No | platform default | Backend provider to use |
+| `--force` | No | `false` | Force destructive restore (required for some backends) |
+| `--base-snapshot <id>` | No | (none) | Base snapshot reference for incremental restore |
+| `--block-size <N[K\|M\|G]>` | No | provider default | I/O chunk size for block-level copy |
 
-## Force Flag
+## Argument Parsing
 
-Some backends perform **destructive** restores -- they overwrite the target
-volume with the contents of the backup. For safety, these backends require the
-`--force` flag:
+All flags are parsed by `parse_restore_request()` at `src/bin/vptcli.rs:559-616`. The
+function uses a manual iterator loop that matches each argument:
 
-- **LVM**: Overwrites the logical volume with `dd`-style block copy.
-- **VSS (Windows)**: Writes blocks directly to the target volume.
+```rust title="src/bin/vptcli.rs:567-599"
+let mut iter = args.into_iter();
+while let Some(arg) = iter.next() {
+    match arg.as_str() {
+        "--provider" => {
+            provider = Some(iter.next().ok_or_else(|| missing("--provider"))?);
+        }
+        "--input" => {
+            input = Some(PathBuf::from(
+                iter.next().ok_or_else(|| missing("--input"))?,
+            ));
+        }
+        "--force" => {
+            force = true;
+        }
+        "--base-snapshot" => {
+            base_snapshot = Some(SnapshotRef::new(
+                iter.next().ok_or_else(|| missing("--base-snapshot"))?,
+            ));
+        }
+        "--block-size" => {
+            let value = iter.next().ok_or_else(|| missing("--block-size"))?;
+            block_size = Some(parse_block_size(&value)?);
+        }
+        value if destination.is_none() => {
+            destination = Some(VolumeRef::new(value));
+        }
+        _ => {
+            return Err(vpt_rs::Error::InvalidArgument {
+                message: format!("unexpected argument `{arg}`"),
+            });
+        }
+    }
+}
+```
 
-Stream-based backends (Btrfs `receive`, ZFS `receive`) create new subvolumes or
-datasets and do **not** require `--force`.
+```mermaid
+flowchart TD
+    A["parse_restore_request(args)"] --> B{arg loop}
+    B -->|"--provider"| C[set provider]
+    B -->|"--input"| D[set input PathBuf]
+    B -->|"--force"| E["force = true"]
+    B -->|"--base-snapshot"| F[set SnapshotRef]
+    B -->|"--block-size"| G[parse_block_size]
+    B -->|positional| H[set destination VolumeRef]
+    B -->|unexpected| I[Error]
+    C --> B
+    D --> B
+    E --> B
+    F --> B
+    G --> B
+    H --> B
+    B -->|done| J[build RestoreRequest]
+```
 
-:::danger
-Using `--force` on a block-level backend **destroys all existing data** on the
-target volume. Double-check the destination path before running the command.
+## The `--force` Flag
+
+Some backends perform destructive restores that overwrite the destination volume. These
+backends require the `--force` flag to be set in the `RestorePlan`. The flag is a
+boolean toggle with no value argument (`src/bin/vptcli.rs:577-579`):
+
+```rust title="src/bin/vptcli.rs:577-579"
+"--force" => {
+    force = true;
+}
+```
+
+:::caution
+Destructive backends (LVM, VSS) require `--force`. Without it, the backend returns
+an `InvalidArgument` error. Always verify the destination volume before using this
+flag.
 :::
 
-**Without `--force` on a destructive backend:**
+## Plan Construction
 
-```bash
-$ vptcli restore --provider lvm /dev/vg0/data --input /backup/data.img
-error: invalid argument: `--force` is required for destructive restore on backend `linux-lvm`
+After parsing, the command constructs a `RestorePlan` and delegates to the backend
+at `src/bin/vptcli.rs:544-557`:
+
+```rust title="src/bin/vptcli.rs:544-557"
+let request = parse_restore_request(args)?;
+let backend = resolve_backend(request.provider.as_deref())?;
+backend.restore_volume(&RestorePlan {
+    source: BackupTarget::ImageFile(request.input.clone()),
+    destination: request.destination,
+    force: request.force,
+    base_snapshot: request.base_snapshot,
+    block_size: request.block_size,
+})?;
+
+println!("backend: {}", backend.backend_name());
+println!("input: {}", request.input.display());
 ```
 
-**With `--force`:**
+The `RestorePlan` struct is defined in `src/types.rs:319-326`:
 
-```bash
-$ vptcli restore --provider lvm /dev/vg0/data --input /backup/data.img --force
-backend: linux-lvm
-input: /backup/data.img
+```rust title="src/types.rs:319-326"
+pub struct RestorePlan {
+    pub source: BackupTarget,
+    pub destination: VolumeRef,
+    pub force: bool,
+    pub base_snapshot: Option<SnapshotRef>,
+    pub block_size: Option<usize>,
+}
 ```
 
-## Block Size
-
-The `--block-size` flag works the same as in `vptcli backup`. It controls the
-I/O chunk size for block-level copy backends:
-
-| Suffix | Multiplier     | Example  |
-|--------|----------------|----------|
-| *(none)* | 1 (bytes)    | `4194304` |
-| `K`    | 1,024          | `4096K`  |
-| `M`    | 1,048,576      | `4M`     |
-| `G`    | 1,073,741,824  | `1G`     |
-
-See the [Backup -- Block Size](./backup.md#block-size) section for full details.
-
-## Incremental Restore
-
-Some backends support incremental restore workflows where you provide a base
-snapshot that the backup was diffed against:
-
-```bash
-vptcli restore /mnt/data \
-  --input /backup/data-incr.img \
-  --base-snapshot /mnt/data/.snapshots/snap1
+```mermaid
+flowchart LR
+    A[RestoreRequest] --> B[resolve_backend]
+    B --> C["build RestorePlan"]
+    C --> D["backend.restore_volume(&plan)"]
+    D --> E["print backend + input"]
+    D -->|error| F["print error to stderr"]
 ```
 
-:::info
-The `--base-snapshot` flag is currently reserved for backends that need an
-explicit base reference during incremental receive. Most backends determine the
-base automatically from the stream metadata.
-:::
+## Output
+
+On success the command prints:
+
+```
+backend: linux-btrfs
+input: /tmp/backup.img
+```
+
+On failure the error is printed to stderr with the prefix `error: `.
 
 ## Examples
 
-### Restore a Btrfs subvolume from a stream
+### Basic restore
 
 ```bash
-vptcli restore /mnt/restored --input /backup/data.img
+vptcli restore /mnt/data/subvol --input /tmp/backup.img
 ```
 
-The Btrfs backend creates a new subvolume at `/mnt/restored` from the received
-stream.
-
-### Restore with an explicit provider
+### Restore with a specific provider
 
 ```bash
-vptcli restore --provider zfs tank/restored --input /backup/tank.img
+vptcli restore --provider btrfs /mnt/data/subvol --input /tmp/backup.img
 ```
 
-### Force-restore to an LVM logical volume
+### Force-restore to an LVM volume
 
 ```bash
-vptcli restore --provider lvm /dev/vg0/restored --input /backup/data.img --force
+vptcli restore /dev/vg0/data --input /tmp/backup.img --provider lvm --force
 ```
 
 ### Restore with a custom block size
 
 ```bash
-vptcli restore --provider lvm /dev/vg0/restored --input /backup/data.img --force --block-size 8M
+vptcli restore /dev/vg0/data --input /tmp/backup.img --block-size 4M
 ```
 
-### Restore to a ZFS dataset
+### Incremental restore with a base snapshot
 
 ```bash
-vptcli restore --provider zfs tank/restored --input /backup/tank-data.img
+vptcli restore /mnt/data/subvol --input /tmp/incr.img --base-snapshot /mnt/data/snapshots/subvol-nightly
 ```
 
-## Output
+## Error Conditions
 
-On success, the CLI prints:
+| Condition | Error Variant | Message |
+|---|---|---|
+| Missing `--input` | `InvalidArgument` | `missing '--input <path>'` |
+| Missing destination | `InvalidArgument` | `missing destination volume/directory` |
+| Missing `--provider` value | `InvalidArgument` | `missing value after '--provider'` |
+| Invalid block size | `InvalidArgument` | `invalid block size '...'` |
+| Unknown flag | `InvalidArgument` | `unexpected argument '...'` |
 
+:::note
+All argument validation errors are produced by the `missing()` helper at
+`src/bin/vptcli.rs:89-93`, which wraps the message in `Error::InvalidArgument`.
+:::
+
+## RestoreRequest Internal Struct
+
+The parsed arguments are held in a local `RestoreRequest` struct at
+`src/bin/vptcli.rs:525-532`:
+
+```rust title="src/bin/vptcli.rs:525-532"
+struct RestoreRequest {
+    provider: Option<String>,
+    input: PathBuf,
+    destination: VolumeRef,
+    force: bool,
+    base_snapshot: Option<SnapshotRef>,
+    block_size: Option<usize>,
+}
 ```
-backend: linux-btrfs
-input: /backup/data.img
+
+This struct is an internal CLI detail and is not part of the public API. It is
+converted into a `RestorePlan` before being passed to the backend.
+
+## Full Restore Pipeline
+
+```mermaid
+flowchart TD
+    A["vptcli restore <dest> --input <file>"] --> B["parse_restore_request"]
+    B --> C{all required args present?}
+    C -->|no| D["Error::InvalidArgument"]
+    C -->|yes| E["resolve_backend(provider)"]
+    E --> F["build RestorePlan"]
+    F --> G["backend.restore_volume(&plan)"]
+    G --> H{backend result}
+    H -->|Ok| I["print backend name + input path"]
+    H -->|Err| J["error! tracing log"]
+    J --> K["eprintln error to stderr"]
+    I --> L["ExitCode::SUCCESS"]
+    K --> M["ExitCode::from(1)"]
 ```
 
-On failure, the CLI prints an error to stderr and exits with code `1`.
+## Restore Workflow
 
-## Error Reference
-
-| Error                 | Common cause                                          |
-|-----------------------|-------------------------------------------------------|
-| `InvalidArgument`     | Missing `--input`, missing destination, or `--force` required but not given |
-| `MissingPath`         | Backup file specified by `--input` does not exist     |
-| `UnsupportedOperation`| Backend does not support restore                      |
-| `CommandFailed`       | External tool returned an error                       |
-| `Timeout`             | External tool exceeded `VPT_COMMAND_TIMEOUT_SECS`      |
-
-## Comparison: Stream vs Block-Level Restore
-
-| Aspect              | Stream-based (Btrfs, ZFS)           | Block-level (LVM, VSS)          |
-|---------------------|--------------------------------------|----------------------------------|
-| `--force` required  | No                                   | Yes                              |
-| Destination         | New subvolume/dataset path           | Existing device path             |
-| Existing data       | Preserved (new subvolume created)    | Destroyed                        |
-| `--block-size` used | No (stream receive)                  | Yes                              |
-| `--base-snapshot`   | Usually auto-detected from stream    | Reserved for future use          |
+```mermaid
+flowchart TD
+    A["vptcli restore"] --> B[parse args]
+    B --> C{valid?}
+    C -->|no| D[error to stderr, exit 1]
+    C -->|yes| E[resolve_backend]
+    E --> F["build RestorePlan"]
+    F --> G["backend.restore_volume"]
+    G --> H{success?}
+    H -->|yes| I["print backend + input, exit 0"]
+    H -->|no| D
+```

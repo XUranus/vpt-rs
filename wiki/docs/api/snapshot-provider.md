@@ -1,14 +1,19 @@
 # SnapshotProvider Trait
 
 The `SnapshotProvider` trait handles snapshot lifecycle management: creating,
-deleting, and listing provider-managed snapshots. Each platform backend
-implements this trait for its native snapshot mechanism.
+deleting, and listing provider-managed snapshots. Each platform backend implements
+this trait for its native snapshot mechanism (Btrfs subvolume snapshots, LVM
+snapshots, ZFS snapshots, Windows VSS).
 
-## Trait Definition
+## Definition
 
-```rust
+The full trait definition is at `src/snapshot.rs:20-31`:
+
+```rust title="src/snapshot.rs:20-31"
 pub trait SnapshotProvider: Backend {
     /// Create a new snapshot of the given volume.
+    ///
+    /// Returns a [`SnapshotInfo`] containing the snapshot handle and metadata.
     fn create_snapshot(&self, request: &SnapshotRequest) -> Result<SnapshotInfo>;
 
     /// Delete an existing snapshot by its handle.
@@ -19,195 +24,237 @@ pub trait SnapshotProvider: Backend {
 }
 ```
 
+:::note
+`SnapshotProvider` extends `Backend` as a supertrait, so every implementation must
+also implement `backend_name()` and `capabilities()`.
+:::
+
+## Trait Hierarchy
+
+```mermaid
+classDiagram
+    class Backend {
+        +backend_name() &'static str
+        +capabilities() &'static [Capability]
+        +supports(capability) bool
+    }
+    class SnapshotProvider {
+        +create_snapshot(&SnapshotRequest) Result~SnapshotInfo~
+        +delete_snapshot(&SnapshotHandle) Result
+        +list_snapshots(&VolumeRef) Result~Vec~SnapshotInfo~~
+    }
+    Backend <|-- SnapshotProvider
+```
+
 ## Methods
 
-| Method                | Parameters                    | Return type            | Description                          |
-|-----------------------|-------------------------------|------------------------|--------------------------------------|
-| `create_snapshot()`   | `&SnapshotRequest`            | `Result<SnapshotInfo>` | Create a new snapshot                |
-| `delete_snapshot()`   | `&SnapshotHandle`             | `Result<()>`           | Delete an existing snapshot          |
-| `list_snapshots()`    | `&VolumeRef`                  | `Result<Vec<SnapshotInfo>>` | List snapshots for a volume     |
-
-## Key Types
-
-### SnapshotRequest
-
-Describes a request to create a snapshot:
+### `create_snapshot`
 
 ```rust
+fn create_snapshot(&self, request: &SnapshotRequest) -> Result<SnapshotInfo>;
+```
+
+Creates a new snapshot of the specified volume. Returns a `SnapshotInfo` containing
+the snapshot handle and metadata.
+
+**Parameter: `request`** -- A reference to a `SnapshotRequest` struct defined at
+`src/types.rs:160-166`:
+
+```rust title="src/types.rs:160-166"
 pub struct SnapshotRequest {
-    pub source: VolumeRef,       // Volume to snapshot
-    pub kind: SnapshotKind,      // Consistency kind
-    pub label: Option<String>,   // Optional label for the snapshot name
-    pub read_only: bool,         // true = read-only snapshot
+    pub source: VolumeRef,
+    pub kind: SnapshotKind,
+    pub label: Option<String>,
+    pub read_only: bool,
 }
 ```
 
-### SnapshotKind
+| Field | Type | Description |
+|---|---|---|
+| `source` | `VolumeRef` | The volume to snapshot |
+| `kind` | `SnapshotKind` | Consistency kind (`CrashConsistent` or `ApplicationConsistent`) |
+| `label` | `Option<String>` | Optional human-readable label |
+| `read_only` | `bool` | Whether the snapshot should be read-only |
 
-```rust
-pub enum SnapshotKind {
-    CrashConsistent,       // Filesystem-consistent, no app quiescing
-    ApplicationConsistent, // Coordinates with VSS writers (Windows)
-}
-```
+**Return: `SnapshotInfo`** -- Defined at `src/types.rs:212-218`:
 
-Accepted string forms for parsing: `"crash"`, `"crash-consistent"`, `"app"`,
-`"application"`, `"application-consistent"`.
-
-### SnapshotHandle
-
-A concrete handle identifying an existing snapshot:
-
-```rust
-pub struct SnapshotHandle {
-    pub id: String,                    // Provider-specific snapshot ID
-    pub source: Option<VolumeRef>,     // Source volume (if known)
-}
-```
-
-The `id` format is provider-specific:
-
-| Backend | ID format                         | Example                         |
-|---------|-----------------------------------|---------------------------------|
-| Btrfs   | Absolute path to snapshot subvol  | `/mnt/data/.snapshots/snap1`    |
-| LVM     | `/dev/<vg>/<snapshot_lv>`         | `/dev/vg0/data-snap`            |
-| ZFS     | `dataset@snapshot_name`           | `tank/data@snap1`               |
-| VSS     | `{GUID}`                          | `{5F34A2B1-...}`                |
-
-### SnapshotInfo
-
-Metadata returned after creating or listing a snapshot:
-
-```rust
+```rust title="src/types.rs:212-218"
 pub struct SnapshotInfo {
-    pub handle: SnapshotHandle,        // Snapshot handle
-    pub backend: &'static str,         // Backend name
-    pub path_hint: Option<PathBuf>,    // Filesystem path (if available)
-    pub read_only: bool,               // Whether the snapshot is read-only
+    pub handle: SnapshotHandle,
+    pub backend: &'static str,
+    pub path_hint: Option<PathBuf>,
+    pub read_only: bool,
 }
 ```
 
-### VolumeRef
+| Field | Type | Description |
+|---|---|---|
+| `handle` | `SnapshotHandle` | Snapshot handle with ID and optional source |
+| `backend` | `&'static str` | Backend name that created the snapshot |
+| `path_hint` | `Option<PathBuf>` | Optional filesystem path to the snapshot |
+| `read_only` | `bool` | Whether the snapshot is read-only |
 
-A stable identifier for a volume. The format is interpreted by each backend:
+### `delete_snapshot`
 
 ```rust
+fn delete_snapshot(&self, snapshot: &SnapshotHandle) -> Result<()>;
+```
+
+Deletes an existing snapshot identified by its handle.
+
+**Parameter: `snapshot`** -- A reference to a `SnapshotHandle` defined at
+`src/types.rs:175-179`:
+
+```rust title="src/types.rs:175-179"
+pub struct SnapshotHandle {
+    pub id: String,
+    pub source: Option<VolumeRef>,
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `String` | Provider-specific snapshot identifier |
+| `source` | `Option<VolumeRef>` | Optional source volume reference |
+
+:::caution
+Deleting a snapshot is irreversible. The `id` format is provider-specific: Btrfs uses
+absolute paths, LVM uses `/dev/<vg>/<lv>`, ZFS uses `dataset@name`, and VSS uses
+`{GUID}`.
+:::
+
+### `list_snapshots`
+
+```rust
+fn list_snapshots(&self, source: &VolumeRef) -> Result<Vec<SnapshotInfo>>;
+```
+
+Lists all snapshots managed by this backend for the given volume.
+
+**Parameter: `source`** -- A reference to a `VolumeRef` defined at
+`src/types.rs:40-43`:
+
+```rust title="src/types.rs:40-43"
 pub struct VolumeRef {
     pub id: String,
 }
 ```
 
-## Usage Examples
+The `id` string is interpreted by each backend:
+- **Btrfs**: absolute subvolume path (e.g. `"/mnt/data/subvol"`)
+- **LVM**: `/dev/<vg>/<lv>` path (e.g. `"/dev/vg0/data"`)
+- **ZFS**: dataset name (e.g. `"tank/data"`) or mount path
+- **Windows**: drive letter (e.g. `"C:"`) or volume GUID path
 
-### Creating a snapshot
+## Supporting Types
+
+### SnapshotKind
+
+The `SnapshotKind` enum (`src/types.rs:109-113`) controls snapshot consistency:
+
+```rust title="src/types.rs:109-113"
+pub enum SnapshotKind {
+    CrashConsistent,
+    ApplicationConsistent,
+}
+```
+
+| Variant | Description | CLI value |
+|---|---|---|
+| `CrashConsistent` | Filesystem-consistent, no app quiescing | `crash` |
+| `ApplicationConsistent` | Coordinates with VSS writers to flush app buffers | `application` |
+
+### SnapshotRef
+
+The `SnapshotRef` type (`src/types.rs:185-203`) is a reference to an existing snapshot,
+separate from `SnapshotHandle` so plans can refer to snapshots created outside the
+current process:
+
+```rust title="src/types.rs:185-203"
+pub struct SnapshotRef {
+    pub id: String,
+    pub origin: Option<VolumeRef>,
+}
+
+impl SnapshotRef {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            origin: None,
+        }
+    }
+
+    pub fn with_origin(mut self, origin: VolumeRef) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+}
+```
+
+## Error Conditions
+
+All methods return `vpt_rs::Result<_>`. Common errors include:
+
+| Error | Condition |
+|---|---|
+| `UnsupportedOperation` | Backend does not implement snapshots |
+| `MissingCapability` | Requested snapshot kind is not supported |
+| `InvalidVolume` | Volume reference is empty |
+| `MissingPath` | Source path does not exist |
+| `CommandFailed` | Underlying tool (e.g. `btrfs subvolume snapshot`) failed |
+
+## Usage Example
 
 ```rust
 use vpt_rs::{SnapshotProvider, SnapshotRequest, SnapshotKind, VolumeRef};
-use vpt_rs::platform;
 
-fn main() -> vpt_rs::Result<()> {
-    let backend = platform::current_backend();
+let backend = vpt_rs::platform::current_backend();
 
-    let request = SnapshotRequest {
-        source: VolumeRef::new("/mnt/data"),
-        kind: SnapshotKind::CrashConsistent,
-        label: Some("nightly".to_string()),
-        read_only: true,
-    };
+// Create a crash-consistent snapshot
+let request = SnapshotRequest {
+    source: VolumeRef::new("/mnt/data/subvol"),
+    kind: SnapshotKind::CrashConsistent,
+    label: Some("nightly".to_string()),
+    read_only: true,
+};
+let info = backend.create_snapshot(&request)?;
+println!("created snapshot: {}", info.handle.id);
 
-    let info = backend.create_snapshot(&request)?;
-    println!("Created snapshot: {}", info.handle.id);
-    println!("Backend: {}", info.backend);
-    if let Some(path) = &info.path_hint {
-        println!("Path: {}", path.display());
-    }
-
-    Ok(())
+// List snapshots
+let snapshots = backend.list_snapshots(&VolumeRef::new("/mnt/data/subvol"))?;
+for snap in &snapshots {
+    println!("{} {}", snap.handle.id, snap.backend);
 }
+
+// Delete the snapshot
+backend.delete_snapshot(&info.handle)?;
 ```
 
-### Listing snapshots
+## Data Flow
 
-```rust
-use vpt_rs::{SnapshotProvider, VolumeRef};
-use vpt_rs::platform;
+```mermaid
+flowchart TD
+    A["CLI: vptcli snapshot create"] --> B["parse SnapshotRequest"]
+    B --> C["backend.create_snapshot(&request)"]
+    C --> D["SnapshotInfo { handle, backend, path_hint, read_only }"]
+    D --> E["print handle.id, source, backend, path_hint"]
 
-fn main() -> vpt_rs::Result<()> {
-    let backend = platform::current_backend();
-    let source = VolumeRef::new("/mnt/data");
+    F["CLI: vptcli snapshot list"] --> G["backend.list_snapshots(&volume)"]
+    G --> H["Vec~SnapshotInfo~"]
+    H --> I["print id + source + backend for each"]
 
-    let snapshots = backend.list_snapshots(&source)?;
-    println!("Found {} snapshot(s):", snapshots.len());
-
-    for snap in &snapshots {
-        let read_only = if snap.read_only { "ro" } else { "rw" };
-        println!("  {} [{}] {}", snap.handle.id, read_only, snap.backend);
-    }
-
-    Ok(())
-}
+    J["CLI: vptcli snapshot delete"] --> K["backend.delete_snapshot(&handle)"]
+    K --> L["Ok(()) or Error"]
 ```
 
-### Deleting a snapshot
+## Cross-References
 
-```rust
-use vpt_rs::{SnapshotProvider, SnapshotHandle};
-use vpt_rs::platform;
-
-fn main() -> vpt_rs::Result<()> {
-    let backend = platform::current_backend();
-
-    let handle = SnapshotHandle {
-        id: "/mnt/data/.snapshots/old-snap".to_string(),
-        source: None,
-    };
-
-    backend.delete_snapshot(&handle)?;
-    println!("Snapshot deleted.");
-
-    Ok(())
-}
-```
-
-### Choosing a backend by name (Linux)
-
-```rust
-use vpt_rs::{SnapshotProvider, SnapshotRequest, SnapshotKind, VolumeRef};
-use vpt_rs::platform;
-
-fn main() -> vpt_rs::Result<()> {
-    // Select the LVM backend explicitly
-    let backend = platform::CurrentBackend::named("lvm")?;
-
-    let request = SnapshotRequest {
-        source: VolumeRef::new("/dev/vg0/data"),
-        kind: SnapshotKind::CrashConsistent,
-        label: None,
-        read_only: true,
-    };
-
-    let info = backend.create_snapshot(&request)?;
-    println!("LVM snapshot: {}", info.handle.id);
-
-    Ok(())
-}
-```
-
-:::note
-`CurrentBackend::named()` is only available on Linux where multiple backends
-are registered. On other platforms, use `platform::current_backend()` which
-returns the native backend.
-:::
-
-## Error Handling
-
-All methods return `Result<T>` using the crate's `Error` enum:
-
-| Error variant              | When it occurs                                          |
-|----------------------------|---------------------------------------------------------|
-| `UnsupportedOperation`     | Backend does not implement snapshot operations          |
-| `MissingCapability`        | Requested snapshot kind not supported (e.g. app-consistent on Btrfs) |
-| `InvalidVolume`            | Volume reference is empty                               |
-| `MissingPath`              | Source path does not exist on disk                      |
-| `CommandFailed`            | External tool (btrfs, lvcreate, zfs) failed             |
-| `Timeout`                  | External tool exceeded the command timeout               |
+| Type | Path | Relationship |
+|---|---|---|
+| `Backend` | `src/backend.rs:20` | Supertrait |
+| `SnapshotRequest` | `src/types.rs:160` | Parameter for `create_snapshot` |
+| `SnapshotHandle` | `src/types.rs:175` | Parameter for `delete_snapshot` |
+| `SnapshotInfo` | `src/types.rs:212` | Return type of `create_snapshot` and `list_snapshots` |
+| `VolumeRef` | `src/types.rs:40` | Parameter for `list_snapshots` |
+| `SnapshotRef` | `src/types.rs:185` | Used in backup/restore plans |
+| `Capability` | `src/types.rs:69` | Queried via `Backend::supports()` |

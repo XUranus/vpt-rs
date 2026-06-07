@@ -2,15 +2,16 @@
 
 The `Backend` trait is the common interface shared by all platform backends.
 Every operational trait -- `SnapshotProvider`, `BackupExecutor`, `RestorePlanner`,
-and `MountManager` -- extends `Backend`, so callers can query capabilities
-without knowing which specific trait a backend implements.
+and `MountManager` -- extends `Backend`, so callers can query capabilities without
+knowing which specific trait a backend implements.
 
-## Trait Definition
+## Definition
 
-```rust
+The full trait definition is at `src/backend.rs:20-31`:
+
+```rust title="src/backend.rs:20-31"
 pub trait Backend: Send + Sync {
-    /// Return the canonical name of this backend
-    /// (e.g. "linux-btrfs", "linux-lvm", "windows-vss").
+    /// Return the canonical name of this backend (e.g. "linux-btrfs", "windows-vss").
     fn backend_name(&self) -> &'static str;
 
     /// Return the set of capabilities this backend supports.
@@ -23,22 +24,64 @@ pub trait Backend: Send + Sync {
 }
 ```
 
+:::note
+The `Backend` trait requires `Send + Sync`, meaning all backend implementations are
+safe to share across threads.
+:::
+
+## Trait Hierarchy
+
+All four operational traits extend `Backend` as a supertrait:
+
+```mermaid
+classDiagram
+    class Backend {
+        +backend_name() &'static str
+        +capabilities() &'static [Capability]
+        +supports(capability) bool
+    }
+    class SnapshotProvider {
+        +create_snapshot(request) Result~SnapshotInfo~
+        +delete_snapshot(handle) Result
+        +list_snapshots(source) Result~Vec~SnapshotInfo~~
+    }
+    class BackupExecutor {
+        +backup_volume(plan) Result
+    }
+    class RestorePlanner {
+        +restore_volume(plan) Result
+    }
+    class MountManager {
+        +mount_snapshot(request) Result~MountHandle~
+        +unmount_snapshot(handle) Result
+    }
+    Backend <|-- SnapshotProvider
+    Backend <|-- BackupExecutor
+    Backend <|-- RestorePlanner
+    Backend <|-- MountManager
+```
+
 ## Methods
 
-| Method           | Return type             | Description                                    |
-|------------------|-------------------------|------------------------------------------------|
-| `backend_name()` | `&'static str`          | Canonical backend name string                  |
-| `capabilities()` | `&'static [Capability]` | Slice of all supported capabilities            |
-| `supports()`     | `bool`                  | Convenience check for a single capability      |
-
-The `supports()` method has a default implementation. You generally do not need
-to override it.
-
-## Capability Variants
-
-The `Capability` enum lists all features a backend may support:
+### `backend_name`
 
 ```rust
+fn backend_name(&self) -> &'static str;
+```
+
+Returns the canonical name of the backend as a static string. Common values include
+`"linux-btrfs"`, `"linux-lvm"`, `"linux-zfs"`, and `"windows-vss"`.
+
+### `capabilities`
+
+```rust
+fn capabilities(&self) -> &'static [Capability];
+```
+
+Returns a static slice of `Capability` values that this backend supports. The
+`Capability` enum is defined in `src/types.rs:69-79`:
+
+```rust title="src/types.rs:69-79"
 pub enum Capability {
     CrashConsistentSnapshot,
     ApplicationConsistentSnapshot,
@@ -51,134 +94,167 @@ pub enum Capability {
 }
 ```
 
-## Trait Hierarchy
+Each variant has a string representation via `as_str()` (`src/types.rs:82-93`):
 
-All four operational traits extend `Backend`:
+| Variant | String |
+|---|---|
+| `CrashConsistentSnapshot` | `crash_consistent_snapshot` |
+| `ApplicationConsistentSnapshot` | `application_consistent_snapshot` |
+| `WritableSnapshotMount` | `writable_snapshot_mount` |
+| `ReadOnlySnapshotMount` | `read_only_snapshot_mount` |
+| `BlockLevelBackup` | `block_level_backup` |
+| `BlockLevelRestore` | `block_level_restore` |
+| `IncrementalSend` | `incremental_send` |
+| `DirectDeviceAccess` | `direct_device_access` |
 
+### `supports`
+
+```rust
+fn supports(&self, capability: Capability) -> bool;
 ```
-Backend (supertrait)
-  +-- SnapshotProvider
-  +-- BackupExecutor
-  +-- RestorePlanner
-  +-- MountManager
+
+A default method that checks whether a specific `Capability` is present in the slice
+returned by `capabilities()`. Returns `true` if the capability is supported.
+
+```rust title="src/backend.rs:28-31"
+fn supports(&self, capability: Capability) -> bool {
+    self.capabilities().contains(&capability)
+}
 ```
 
-This means any backend that implements, say, `SnapshotProvider` also implements
-`Backend`. You can always call `backend_name()` and `capabilities()` on it.
+:::tip
+The `supports()` method is the preferred way to check capabilities rather than
+manually iterating the slice. It uses `contains()` on a static slice, which is
+efficient for the small number of capability variants.
+:::
 
 ## Usage Examples
 
-### Querying the current backend
+### Querying a backend
 
 ```rust
 use vpt_rs::{Backend, Capability};
-use vpt_rs::platform;
 
-fn main() {
-    let backend = platform::current_backend();
+let backend = vpt_rs::platform::current_backend();
+println!("backend: {}", backend.backend_name());
 
-    println!("Backend: {}", backend.backend_name());
-    println!("Supports crash-consistent snapshots: {}",
-        backend.supports(Capability::CrashConsistentSnapshot));
-    println!("Supports incremental send: {}",
-        backend.supports(Capability::IncrementalSend));
+if backend.supports(Capability::CrashConsistentSnapshot) {
+    println!("supports crash-consistent snapshots");
+}
+
+for cap in backend.capabilities() {
+    println!("  - {}", cap);
 }
 ```
 
-### Listing all capabilities
+### Selecting a backend on Linux
 
 ```rust
 use vpt_rs::Backend;
-use vpt_rs::platform;
 
-fn main() {
-    let backend = platform::current_backend();
+// On Linux, select a named backend
+let backend = vpt_rs::platform::CurrentBackend::named("btrfs")?;
+println!("selected: {}", backend.backend_name());
+```
 
-    println!("{} capabilities:", backend.backend_name());
-    for cap in backend.capabilities() {
-        println!("  - {}", cap);
+:::tip
+On non-Linux platforms, `CurrentBackend::named()` only accepts the platform's native
+backend name. On Linux, it accepts any of the available backend names (`btrfs`, `lvm`,
+`zfs`).
+:::
+
+## Cross-References
+
+| Type | Path | Relationship |
+|---|---|---|
+| `Capability` | `src/types.rs:69-79` | Enum returned by `capabilities()` |
+| `SnapshotProvider` | `src/snapshot.rs:20` | Extends `Backend` for snapshot ops |
+| `BackupExecutor` | `src/backup.rs:19` | Extends `Backend` for backup ops |
+| `RestorePlanner` | `src/restore.rs:19` | Extends `Backend` for restore ops |
+
+## Resolution in the CLI
+
+The CLI resolves a backend from the `--provider` flag via `resolve_backend()` at
+`src/bin/vptcli.rs:65-87`. On Linux it delegates to `CurrentBackend::named()`; on
+other platforms it falls back to `platform::current_backend()`.
+
+```rust title="src/bin/vptcli.rs:65-87"
+fn resolve_backend(provider: Option<&str>) -> vpt_rs::Result<platform::CurrentBackend> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(name) = provider {
+            return platform::CurrentBackend::named(name);
+        }
+    }
+
+    #[allow(unreachable_code)]
+    {
+        if let Some(name) = provider {
+            let backend = platform::current_backend();
+            if name == backend.backend_name() {
+                return Ok(backend);
+            }
+            return Err(vpt_rs::Error::InvalidArgument {
+                message: format!("provider selection is not supported on this platform: `{name}`"),
+            });
+        }
+        Ok(platform::current_backend())
     }
 }
 ```
 
-Output on a Linux Btrfs system:
-
+```mermaid
+flowchart TD
+    A["resolve_backend(provider)"] --> B{provider given?}
+    B -->|no| C["platform::current_backend()"]
+    B -->|yes| D{Linux?}
+    D -->|yes| E["CurrentBackend::named(name)"]
+    D -->|no| F{name == native?}
+    F -->|yes| C
+    F -->|no| G[Error::InvalidArgument]
+    C --> H[return backend]
+    E --> H
 ```
-linux-btrfs capabilities:
-  - crash_consistent_snapshot
-  - read_only_snapshot_mount
-  - writable_snapshot_mount
-  - incremental_send
-```
 
-### Checking capabilities before calling operations
+## Capability Display
 
-```rust
-use vpt_rs::{Backend, Capability, SnapshotProvider};
-use vpt_rs::platform;
-use vpt_rs::{SnapshotRequest, SnapshotKind, VolumeRef};
+The CLI prints capabilities via the `snapshot capabilities` subcommand. The display
+loop at `src/bin/vptcli.rs:168-171` iterates the `capabilities()` slice and prints
+each one using its `Display` implementation:
 
-fn safe_create_snapshot(backend: &impl SnapshotProvider) -> vpt_rs::Result<()> {
-    if !backend.supports(Capability::CrashConsistentSnapshot) {
-        eprintln!("backend {} does not support snapshots", backend.backend_name());
-        return Ok(());
-    }
-
-    let request = SnapshotRequest {
-        source: VolumeRef::new("/mnt/data"),
-        kind: SnapshotKind::CrashConsistent,
-        label: None,
-        read_only: true,
-    };
-    let info = backend.create_snapshot(&request)?;
-    println!("created snapshot: {}", info.handle.id);
-    Ok(())
+```rust title="src/bin/vptcli.rs:168-171"
+println!("{}", descriptor.backend_name);
+for capability in descriptor.capabilities {
+    println!("- {capability}");
 }
 ```
 
-## BackendDescriptor Struct
+The `Display` impl for `Capability` delegates to `as_str()` at
+`src/types.rs:96-100`:
 
-The `BackendDescriptor` struct is a static summary of a backend, used by the
-CLI to print backend information without holding a live backend instance:
-
-```rust
-pub struct BackendDescriptor {
-    pub platform: &'static str,          // e.g. "linux"
-    pub provider_name: Option<&'static str>, // e.g. Some("btrfs")
-    pub backend_name: &'static str,      // e.g. "linux-btrfs"
-    pub capabilities: &'static [Capability],
-}
-```
-
-### Getting descriptors programmatically
-
-```rust
-use vpt_rs::platform;
-
-fn main() {
-    // Current backend descriptor
-    let desc = platform::current_backend_descriptor();
-    println!("{}: {}", desc.backend_name, desc.platform);
-
-    // All available backends on this platform
-    for desc in platform::available_backend_descriptors() {
-        println!("{:?} -- {} caps", desc.provider_name, desc.capabilities.len());
+```rust title="src/types.rs:96-100"
+impl std::fmt::Display for Capability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 ```
 
-## Platform Backends
+## Error Conditions
 
-| Platform     | Backend name    | Provider name | Notes                               |
-|--------------|-----------------|---------------|--------------------------------------|
-| Linux        | `linux-btrfs`   | `btrfs`       | Default on Linux                     |
-| Linux        | `linux-lvm`     | `lvm`         | Requires LVM2                        |
-| Linux        | `linux-zfs`     | `zfs`         | Requires ZFS on Linux                |
-| macOS        | `darwin-apfs`   | --            | APFS snapshot support                |
-| Windows      | `windows-vss`   | --            | Volume Shadow Copy Service           |
+The `Backend` trait methods themselves do not return errors, but the operational
+traits that extend it do. When a backend does not support a requested operation, it
+returns one of the error variants from `src/error.rs:10-52`:
 
-:::note
-On non-Linux platforms, only the native backend is available. On Linux, all
-three backends are registered and the default is `btrfs`. Use `--provider` to
-override on the CLI or call `LinuxBackend::named("lvm")` in library code.
+| Error Variant | Condition |
+|---|---|
+| `UnsupportedOperation` | The backend does not implement the requested trait |
+| `MissingCapability` | The requested capability is not available |
+| `InvalidArgument` | Invalid parameter passed to a method |
+| `CommandFailed` | The underlying platform tool failed |
+
+:::caution
+Always check `supports()` before calling an operational method. Backends that do not
+implement a trait will return `UnsupportedOperation`, but checking capabilities first
+allows for graceful degradation.
 :::

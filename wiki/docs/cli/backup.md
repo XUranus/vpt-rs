@@ -10,164 +10,265 @@ incremental (parent-based) backups, and configurable block sizes.
 vptcli backup <source> --output <stream-file> [options]
 ```
 
+Running `vptcli backup` with no arguments, or with `--help` / `-h`, prints the usage
+text. The help detection is at `src/bin/vptcli.rs:404-412`:
+
+```rust title="src/bin/vptcli.rs:404-412"
+fn run_backup(args: Vec<String>) -> vpt_rs::Result<()> {
+    if args.is_empty()
+        || args
+            .iter()
+            .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        print_backup_usage();
+        return Ok(());
+    }
+    // ...
+}
+```
+
 ## Options
 
-| Flag                    | Required | Default          | Description                                          |
-|-------------------------|----------|------------------|------------------------------------------------------|
-| `<source>`              | **Yes**  | --               | Source volume identifier                             |
-| `--output`              | **Yes**  | --               | Path to the output image/stream file                 |
-| `--provider`            | No       | Platform default | Backend provider name (Linux)                        |
-| `--snapshot-source`     | No       | Off              | Treat `<source>` as a snapshot ID instead of a volume |
-| `--parent-snapshot`     | No       | None             | Parent snapshot ID for incremental backup            |
-| `--snapshot-kind`       | No       | `crash`          | Consistency kind for the temporary snapshot          |
-| `--snapshot-label`      | No       | None             | Label for the temporary snapshot name                |
-| `--snapshot-read-write` | No       | Read-only        | Create a writable temporary snapshot                 |
-| `--no-snapshot`         | No       | Off              | Disable temporary snapshot creation                  |
-| `--block-size`          | No       | 4 MiB            | I/O block size (see [Block Size](#block-size))       |
+| Flag | Required | Default | Description |
+|---|---|---|---|
+| `<source>` | Yes | -- | Source volume path or identifier |
+| `--output <path>` | Yes | -- | Output image file path |
+| `--provider <name>` | No | platform default | Backend provider to use |
+| `--snapshot-source` | No | `false` | Treat the source argument as a snapshot ID |
+| `--no-snapshot` | No | `false` | Disable automatic temporary snapshot creation |
+| `--snapshot-kind crash\|application` | No | `crash` | Consistency kind for the temporary snapshot |
+| `--snapshot-label <name>` | No | (none) | Label for the temporary snapshot |
+| `--snapshot-read-write` | No | read-only | Create the temporary snapshot as writable |
+| `--parent-snapshot <id>` | No | (none) | Parent snapshot ID for incremental backup |
+| `--block-size <N[K\|M\|G]>` | No | provider default | I/O chunk size for block-level copy |
 
-## Backup Sources
+## Argument Parsing
 
-There are two ways to specify what to back up:
+All flags are parsed by `parse_backup_request()` at `src/bin/vptcli.rs:429-513`. The
+function iterates through arguments manually, matching each one against known flags:
 
-### Live volume (default)
-
-Provide the volume identifier directly. The backend may create a temporary
-snapshot before copying, depending on the snapshot policy:
-
-```bash
-vptcli backup /mnt/data --output /backup/data.img
+```rust title="src/bin/vptcli.rs:442-486"
+let mut iter = args.into_iter();
+while let Some(arg) = iter.next() {
+    match arg.as_str() {
+        "--provider" => {
+            provider = Some(iter.next().ok_or_else(|| missing("--provider"))?);
+        }
+        "--output" => {
+            output = Some(PathBuf::from(
+                iter.next().ok_or_else(|| missing("--output"))?,
+            ));
+        }
+        "--snapshot-source" => {
+            snapshot_source = true;
+        }
+        "--parent-snapshot" => {
+            parent_snapshot = Some(SnapshotRef::new(
+                iter.next().ok_or_else(|| missing("--parent-snapshot"))?,
+            ));
+        }
+        "--snapshot-label" => {
+            snapshot_label = Some(iter.next().ok_or_else(|| missing("--snapshot-label"))?);
+        }
+        "--snapshot-kind" => {
+            let value = iter.next().ok_or_else(|| missing("--snapshot-kind"))?;
+            snapshot_kind = value.parse()?;
+        }
+        "--snapshot-read-write" => {
+            snapshot_read_only = false;
+        }
+        "--block-size" => {
+            let value = iter.next().ok_or_else(|| missing("--block-size"))?;
+            block_size = Some(parse_block_size(&value)?);
+        }
+        "--no-snapshot" => {
+            snapshot_enabled = false;
+        }
+        value if source.is_none() => {
+            source = Some(VolumeRef::new(value));
+        }
+        _ => {
+            return Err(vpt_rs::Error::InvalidArgument {
+                message: format!("unexpected argument `{arg}`"),
+            });
+        }
+    }
+}
 ```
 
-### Explicit snapshot source
-
-Use `--snapshot-source` to tell the CLI that `<source>` is an existing snapshot
-identifier, not a live volume:
-
-```bash
-vptcli snapshot create /mnt/data --label "backup"
-vptcli backup /mnt/data/.snapshots/backup --output /backup/data.img --snapshot-source
+```mermaid
+flowchart TD
+    A["parse_backup_request(args)"] --> B{arg loop}
+    B -->|"--provider"| C[set provider]
+    B -->|"--output"| D[set output PathBuf]
+    B -->|"--snapshot-source"| E["snapshot_source = true"]
+    B -->|"--parent-snapshot"| F[set SnapshotRef]
+    B -->|"--snapshot-label"| G[set label]
+    B -->|"--snapshot-kind"| H["parse SnapshotKind"]
+    B -->|"--snapshot-read-write"| I["read_only = false"]
+    B -->|"--block-size"| J[parse_block_size]
+    B -->|"--no-snapshot"| K["enabled = false"]
+    B -->|positional| L[set source VolumeRef]
+    B -->|unexpected| M[Error]
+    C --> B
+    D --> B
+    E --> B
+    F --> B
+    G --> B
+    H --> B
+    I --> B
+    J --> B
+    K --> B
+    L --> B
+    B -->|done| N[build BackupRequest]
 ```
 
-## Snapshot Policies
+## Snapshot Source vs Volume Source
 
-By default, `vptcli backup` tells the backend to create a temporary
-crash-consistent snapshot before copying. You can customize this behavior:
+The `--snapshot-source` flag changes how the positional `<source>` argument is
+interpreted. When set, the source volume ID is reused as the snapshot ID and the
+source becomes a `BackupSource::Snapshot`:
 
-| Policy               | Flag combination                            | Behavior                                  |
-|----------------------|---------------------------------------------|-------------------------------------------|
-| Temporary (default)  | *(no flags)*                                | Create a crash-consistent snapshot        |
-| Temporary, app-safe  | `--snapshot-kind application`               | Application-consistent snapshot           |
-| Labeled snapshot     | `--snapshot-label "name"`                   | Use a specific label for the snapshot     |
-| Writable snapshot    | `--snapshot-read-write`                     | Snapshot is writable (default: read-only) |
-| No snapshot          | `--no-snapshot`                             | Use the source as-is, no snapshot created |
-
-:::info
-Not all backends support all snapshot kinds. The `application` kind requires
-VSS writer coordination on Windows. Backends that do not support a given kind
-will return a `MissingCapability` error.
-:::
-
-## Block Size
-
-The `--block-size` flag controls the I/O chunk size used by block-level copy
-backends (e.g. LVM `dd`-style copy). It accepts a plain number or a number
-with a suffix:
-
-| Suffix | Multiplier     | Example    | Result         |
-|--------|----------------|------------|----------------|
-| *(none)* | 1 (bytes)    | `4194304`  | 4,194,304 bytes |
-| `K`    | 1,024          | `4096K`    | 4,194,304 bytes |
-| `M`    | 1,048,576      | `4M`       | 4,194,304 bytes |
-| `G`    | 1,073,741,824  | `1G`       | 1,073,741,824 bytes |
-
-The suffix is case-insensitive (`4m` and `4M` are equivalent). The value must
-be greater than zero and must not overflow `usize`.
-
-:::tip
-For most workloads the default 4 MiB block size is a good choice. Increase it
-to `8M` or `16M` for large volumes to improve throughput.
-:::
-
-## Incremental Backup
-
-For backends that support incremental send (Btrfs, ZFS), use `--parent-snapshot`
-to perform an incremental backup. The backend will only transmit the differences
-since the parent snapshot:
-
-```bash
-# Full backup
-vptcli backup /mnt/data --output /backup/data-full.img
-
-# Incremental backup based on a previous snapshot
-vptcli backup /mnt/data --output /backup/data-incr.img --parent-snapshot /mnt/data/.snapshots/snap1
+```rust title="src/bin/vptcli.rs:496-503"
+source: if snapshot_source {
+    let volume = source;
+    let snapshot_id = volume.id.clone();
+    BackupSource::Snapshot(SnapshotRef::new(snapshot_id).with_origin(volume))
+} else {
+    BackupSource::Volume(source)
+},
 ```
 
-:::caution
-Incremental backups are only supported by stream-based backends (Btrfs `send`,
-ZFS `send`). Block-level backends (LVM, VSS) ignore the parent snapshot and
-perform a full copy.
+| Flag | Source Type | Behavior |
+|---|---|---|
+| (default) | `BackupSource::Volume` | Backup the live volume directly |
+| `--snapshot-source` | `BackupSource::Snapshot` | Use the source ID as a snapshot reference |
+
+## Snapshot Policy
+
+The snapshot policy controls whether a temporary snapshot is created before backup.
+The policy is built at `src/bin/vptcli.rs:505-510`:
+
+```rust title="src/bin/vptcli.rs:505-510"
+snapshot_policy: if snapshot_enabled {
+    SnapshotPolicy::temporary(snapshot_kind, snapshot_label, snapshot_read_only)
+} else {
+    SnapshotPolicy::disabled()
+},
+```
+
+| Combination | Policy |
+|---|---|
+| (default) | Temporary crash-consistent, read-only snapshot |
+| `--snapshot-kind application` | Temporary application-consistent snapshot |
+| `--snapshot-label nightly` | Snapshot with label "nightly" |
+| `--no-snapshot` | No temporary snapshot; backup the source as-is |
+
+:::note
+The `SnapshotPolicy::temporary()` constructor is defined in `src/types.rs:268-275`.
+When set to `Disabled`, the backend will attempt to back up the source directly
+without creating an intermediate snapshot.
 :::
+
+## Plan Construction
+
+After parsing, the command constructs a `BackupPlan` and delegates to the backend
+at `src/bin/vptcli.rs:414-427`:
+
+```rust title="src/bin/vptcli.rs:414-427"
+let request = parse_backup_request(args)?;
+let backend = resolve_backend(request.provider.as_deref())?;
+backend.backup_volume(&BackupPlan {
+    source: request.source,
+    target: BackupTarget::ImageFile(request.output.clone()),
+    snapshot_policy: request.snapshot_policy,
+    parent_snapshot: request.parent_snapshot,
+    block_size: request.block_size,
+})?;
+
+println!("backend: {}", backend.backend_name());
+println!("output: {}", request.output.display());
+```
+
+The `BackupPlan` struct is defined in `src/types.rs:303-310`:
+
+```rust title="src/types.rs:303-310"
+pub struct BackupPlan {
+    pub source: BackupSource,
+    pub target: BackupTarget,
+    pub snapshot_policy: SnapshotPolicy,
+    pub parent_snapshot: Option<SnapshotRef>,
+    pub block_size: Option<usize>,
+}
+```
+
+```mermaid
+flowchart LR
+    A[BackupRequest] --> B[resolve_backend]
+    B --> C["build BackupPlan"]
+    C --> D["backend.backup_volume(&plan)"]
+    D --> E["print backend + output"]
+    D -->|error| F["print error to stderr"]
+```
+
+## Output
+
+On success the command prints:
+
+```
+backend: linux-btrfs
+output: /tmp/backup.img
+```
+
+On failure the error is printed to stderr with the prefix `error: `.
 
 ## Examples
 
-### Full backup of a Btrfs subvolume
+### Basic backup
 
 ```bash
-vptcli backup /mnt/data --output /backup/data.img
+vptcli backup /mnt/data/subvol --output /tmp/backup.img
 ```
 
 ### Backup with a specific provider
 
 ```bash
-vptcli backup --provider lvm /dev/vg0/data --output /backup/vg0-data.img
+vptcli backup --provider btrfs /mnt/data/subvol --output /tmp/backup.img
 ```
 
-### Backup without creating a snapshot
+### Application-consistent backup with a label
 
 ```bash
-vptcli backup /mnt/data --output /backup/data.img --no-snapshot
+vptcli backup /dev/vg0/data --output /tmp/backup.img \
+    --snapshot-kind application --snapshot-label pre-upgrade
 ```
 
-### Incremental backup with a labeled snapshot
+### Incremental backup against a parent snapshot
 
 ```bash
-vptcli backup /mnt/data \
-  --output /backup/data-incr.img \
-  --parent-snapshot /mnt/data/.snapshots/nightly \
-  --snapshot-label "nightly" \
-  --snapshot-kind crash
+vptcli backup /mnt/data/subvol --output /tmp/incr.img \
+    --parent-snapshot /mnt/data/snapshots/subvol-nightly
 ```
 
-### Large-volume backup with custom block size
+### Backup without temporary snapshot
 
 ```bash
-vptcli backup /dev/vg0/largedisk --output /backup/disk.img --block-size 16M
+vptcli backup /dev/vg0/data --output /tmp/backup.img --no-snapshot
 ```
 
-### Backup an existing snapshot directly
+### Backup with custom block size
 
 ```bash
-vptcli snapshot create /mnt/data --label "pre-migration"
-vptcli backup /mnt/data/.snapshots/pre-migration --output /backup/migration.img --snapshot-source
+vptcli backup /dev/vg0/data --output /tmp/backup.img --block-size 4M
 ```
 
-## Output
+### Use an existing snapshot as the source
 
-On success, the CLI prints:
-
-```
-backend: linux-btrfs
-output: /backup/data.img
+```bash
+vptcli backup /mnt/data/snapshots/subvol-nightly --output /tmp/backup.img --snapshot-source
 ```
 
-On failure, the CLI prints an error message to stderr and exits with code `1`.
-
-## Error Reference
-
-| Error                       | Common cause                                         |
-|-----------------------------|------------------------------------------------------|
-| `InvalidArgument`           | Missing `--output`, unknown flag, or invalid block size |
-| `MissingPath`               | Source path does not exist                           |
-| `MissingCapability`         | Snapshot kind not supported by the backend           |
-| `CommandFailed`             | External tool (btrfs, lvcreate, zfs) returned an error |
-| `Timeout`                   | External tool exceeded `VPT_COMMAND_TIMEOUT_SECS`     |
+:::caution
+The `--output` flag is mandatory. Omitting it produces an `InvalidArgument` error
+with the message `missing '--output <path>'`.
+:::
